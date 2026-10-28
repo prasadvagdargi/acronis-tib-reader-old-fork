@@ -1,40 +1,43 @@
 {
 	"name": "acronis-tib",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"private": true,
-	"description": "",
+	"description": "Read, verify, extract and mount Acronis True Image (.tib) backups",
+	"license": "MIT",
 	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"bin": {
+		"tib": "dist/cli.js"
+	},
+	"engines": {
+		"node": ">=22"
+	},
 	"scripts": {
-		"test": "./node_modules/.bin/mocha",
-		"build": "./node_modules/.bin/tsc --project ."
+		"build": "tsc -p tsconfig.json",
+		"typecheck": "tsc -p tsconfig.test.json --noEmit",
+		"pretest": "tsc -p tsconfig.test.json",
+		"test": "node --test \"build/test/**/*.test.js\""
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+git@github.com:dennisss/acronis-tib.git"
+		"url": "git+https://github.com/dennisss/acronis-tib.git"
 	},
 	"author": {
 		"name": "Dennis Shtatnov",
 		"url": "https://github.com/dennisss"
 	},
-	"devDependencies": {
-		"@types/node": "^10.12.5",
-		"@types/xml2js": "^0.4.3",
-		"mocha": "^5.0.5",
-		"ts-node": "^7.0.1",
-		"typescript": "^3.1.6"
-	},
 	"files": [
-		"dist/**/*",
+		"dist",
 		"README.md",
-		"LICENSE",
-		"index.js"
+		"LICENSE"
 	],
 	"dependencies": {
-		"@types/fs-extra": "^5.0.4",
-		"adler-32": "^1.2.0",
-		"fs-extra": "^7.0.1",
-		"fuse-bindings": "https://github.com/dennisss/fuse-bindings.git#46279f0c864af21c95f7c6b3b466b7f73f459036",
-		"tslib": "^1.9.3",
-		"xml2js": "^0.4.19"
+		"adler-32": "^1.3.1",
+		"xml2js": "^0.6.2"
+	},
+	"devDependencies": {
+		"@types/node": "^24.19.2",
+		"@types/xml2js": "^0.4.14",
+		"typescript": "^7.0.2"
 	}
 }

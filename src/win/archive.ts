@@ -1,4 +1,4 @@
-import fs from 'fs-extra';
+import fs from 'node:fs';
 import Archive from '../archive';
 import { VolumeVersion } from '../volume';
 import Volume from '../volume';
@@ -60,7 +60,7 @@ export default class WindowsArchive extends Archive {
 		});
 
 		// First we will retrieve all volumes based on filenames
-		let allFiles = await fs.readdir(dir);
+		let allFiles = await fs.promises.readdir(dir);
 		for(let fname of allFiles) {
 
 			// Skip the initial volume 

@@ -210,13 +210,12 @@ export default class WindowsSlice extends Slice {
 	}
 
 
-	reader: Reader; /**< A reader over this single slice */
-	absoluteReader: ConcatenatedReader; /**< A reader over the entire archive up to this point (We don't need to use a full archive reader as we don't expect a slice to contain data from future not-yet created child slices). The totalReader of the final slice can be considering to completely cover the entire archive */
+	reader!: Reader; /**< A reader over this single slice */
+	absoluteReader!: ConcatenatedReader; /**< A reader over the entire archive up to this point (We don't need to use a full archive reader as we don't expect a slice to contain data from future not-yet created child slices). The totalReader of the final slice can be considering to completely cover the entire archive */
 
-	footer: VolumeFooter;
-	trailer: SliceTrailer;
-	config: SliceConfig;
-	listing: ListingRecord;
+	trailer!: SliceTrailer;
+	config: SliceConfig = {};
+	listing!: ListingRecord;
 
 	get id() {
 		// TODO

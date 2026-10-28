@@ -1,4 +1,4 @@
-import fs from 'fs-extra';
+import fs from 'node:fs';
 import Archive from '../archive';
 import Volume, { VolumeVersion } from '../volume';
 import MacVolume from './volume';
@@ -22,7 +22,7 @@ export class MacArchive extends Archive {
 		// In this mode, we will have multiple slices represented by a single volume 
 		let metaFileName = initialVolume.fileName + '.metadata';
 
-		if(!(await fs.existsSync(metaFileName))) {
+		if(!(fs.existsSync(metaFileName))) {
 			throw new Error('Missing metafile');
 		}
 

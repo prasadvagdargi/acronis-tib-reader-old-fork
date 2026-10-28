@@ -1,25 +1,19 @@
 {
 	"compilerOptions": {
-		"module": "commonjs",
-		"moduleResolution": "node",
-		"target": "es2017",
-		"lib": [
-			"es2017"
-		],
-		"noImplicitAny": true,
-		"removeComments": false,
-		"sourceMap": false,
-		"preserveConstEnums": true,
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		"target": "es2023",
+		"lib": ["es2023"],
+		"types": ["node"],
+		"strict": true,
+		"noImplicitOverride": true,
+		"noFallthroughCasesInSwitch": true,
 		"esModuleInterop": true,
-		"strictNullChecks": true,
-		"outDir": "./dist/",
-		"importHelpers": true,
-		"declaration": true
+		"skipLibCheck": true,
+		"declaration": true,
+		"sourceMap": true,
+		"rootDir": "./src",
+		"outDir": "./dist"
 	},
-	"include": [
-		"src/**/*"
-	],
-	"exclude": [
-		"node_modules"
-	]
+	"include": ["src/**/*"]
 }

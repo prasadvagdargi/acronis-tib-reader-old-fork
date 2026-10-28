@@ -2,8 +2,11 @@
 *.swp
 node_modules
 .DS_Store
-dist/*
+dist/
+build/
 knowledge_base
 out
 ext
 mnt
+*.tib
+*.tib.metadata

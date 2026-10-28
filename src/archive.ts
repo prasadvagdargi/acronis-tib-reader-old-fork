@@ -1,4 +1,4 @@
-import fs from 'fs-extra';
+import fs from 'node:fs';
 import Volume, { VolumeVersion } from './volume';
 import Slice from './slice';
 
@@ -20,7 +20,7 @@ export default abstract class Archive {
 		// Normalize in case the name of a Mac metadata file was given
 		fileName = fileName.replace(/\.tib\.metadata$/, '.tib');
 
-		if(!(await fs.existsSync(fileName))) {
+		if(!(fs.existsSync(fileName))) {
 			throw new Error('Missing volume file');
 		}
 

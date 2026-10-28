@@ -8,7 +8,7 @@ export default class MacSlice extends Slice {
 	
 	// A reference to the box for this slice
 	box: MetaDataBox;
-	config: SliceConfig;
+	config: SliceConfig = {};
 
 	public constructor(volumes: MacVolume[], parent: MacSlice|null, box: MetaDataBox) {
 		super(volumes, parent);
