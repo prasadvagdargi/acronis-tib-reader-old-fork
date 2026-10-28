@@ -1,7 +1,7 @@
 import { ReadCompressedStream } from '../compression';
 import { ReadRecord, ReadChunkHeader, ReadAllBoxes } from './record';
 import { Box } from './box';
-import { Reader, DataViewReader, ReaderEndian } from '../reader';
+import { Reader, BufferReader } from '../reader';
 import { CheckAllZeros } from '../utils';
 
 
@@ -38,7 +38,7 @@ export async function ParseMacVolumeMetaFile(reader: Reader): Promise<MacVolumeM
 				console.warn('Detected unknown data in padding after compressed stream');
 			}
 
-			let chunkReader = new DataViewReader(chunkData, ReaderEndian.LittleEndian);
+			let chunkReader = new BufferReader(chunkData);
 
 			let chunk = await ReadChunkHeader(chunkReader);
 			

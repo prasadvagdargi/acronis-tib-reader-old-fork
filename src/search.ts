@@ -6,23 +6,20 @@ function primitiveComparator(it: any, v: any) {
 	else if(it > v) {
 		return 1;
 	}
-	
+
 	return 0;
 }
 
 
 /**
- * Performs binary search on a sorted array and returns the index of the first found item with the given value
- * 
- * -1 is returned if the value is not found
- * 
- * NOTE: This will silently fail if the array is not sorted
- * NOTE: If there are duplicated in the array, this is NOT guranteed to find the duplicate with the lowest index (it may return any one of them)
- * 
- * @param arr
- * @param val
- * @param cmp
- * @param approximate if true, returned the closes node to the given if no exact match could be found (the returned index will either be the immediately above the slot for the value or immediately below it)
+ * Binary search on a sorted array. Returns the index of an item that compares equal to 'val', or -1.
+ *
+ * 'cmp(item, val)' must return < 0 if item sorts before val, > 0 if after, and 0 if it matches.
+ *
+ * NOTE: If there are duplicates, any one of them may be returned
+ *
+ * @param approximate if true and there is no exact match, returns the index where 'val' would be
+ *   inserted, clamped to a valid index (or -1 for an empty array)
  */
 export default function search<T, V>(
 	arr: ReadonlyArray<T>,
@@ -31,43 +28,31 @@ export default function search<T, V>(
 	approximate?: boolean
 ) : number {
 
-	if(arr.length === 0) {
-		return -1;
-	}
-
-	// But default, a primitive comparator will be used
 	if(!cmp) {
 		cmp = primitiveComparator;
 	}
 
-	let startIdx = 0;
-	let endIdx = arr.length;
+	let lo = 0;
+	let hi = arr.length;
 
-	// NOTE: The loop constraints are not important. we are essentially just doing a while(true) bounded above be any complexity > log(n) the actual expected performance of the search
-	// NOTE: Even for an empty array, at least one iteration will be run just to hit the base case
-	for(var it = 0; it < arr.length + 1; it++) {
-
-		var midIdx = Math.floor((endIdx + startIdx) / 2);
-
-		var c = cmp(arr[midIdx], val);
+	while(lo < hi) {
+		let mid = (lo + hi) >>> 1;
+		let c = cmp(arr[mid], val);
 
 		if(c === 0) {
-			return midIdx;
+			return mid;
 		}
-		else if(endIdx - startIdx <= 1) {
-			if(approximate) {
-				return startIdx;
-			}
-
-			return -1; // Fail
+		else if(c < 0) {
+			lo = mid + 1;
 		}
-		else if(c < 0) { // Given item is less that the target value
-			startIdx = midIdx + 1;
-		}
-		else { // if(c > 0)
-			endIdx = midIdx;
+		else {
+			hi = mid;
 		}
 	}
 
-	throw new Error('Search failed');
+	if(approximate && arr.length > 0) {
+		return Math.min(lo, arr.length - 1);
+	}
+
+	return -1;
 }

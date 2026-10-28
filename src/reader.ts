@@ -1,131 +1,142 @@
-import fs from 'fs-extra';
-import { ToArrayBuffer } from './utils';
+import fs from 'node:fs/promises';
 import search from './search';
 
+/**
+ * Largest single read we allow. Size fields in a corrupt file could otherwise ask for gigabytes of memory.
+ */
+export const MAX_READ_SIZE = 256 * 1024 * 1024;
 
-export enum ReaderEndian {
-	LittleEndian = 1,
-	BigEndian = 2
+
+function checkReadSize(n: number) {
+	if(!Number.isSafeInteger(n) || n < 0) {
+		throw new RangeError('Invalid read size: ' + n);
+	}
+
+	if(n > MAX_READ_SIZE) {
+		throw new RangeError('Read of ' + n + ' bytes is larger than the limit of ' + MAX_READ_SIZE);
+	}
 }
 
 /**
- * Generic interface for reading data
+ * Generic interface for reading little-endian binary data
  */
 export abstract class Reader {
 
 	/**
-	 * Should clean up the reader and make it unusable
+	 * Releases this reader. Calling it more than once is harmless.
 	 */
 	abstract close(): Promise<void>;
 
 	/**
-	 * Retrieves the current position of the reader
+	 * Current position of the reader
 	 */
 	abstract pos(): number;
 
 	/**
-	 * Gets the total size of the reader. If it isn't trivial to figure out, then this can be very expensive
+	 * Total size of the reader in bytes
 	 */
 	abstract length(): Promise<number>;
 
 	/**
-	 * Changes the absolute position of the reader 
+	 * Changes the absolute position of the reader
 	 */
 	abstract seek(pos: number): void;
 
 	/**
-	 * Abvances the current reader postition by this amount
+	 * Advances the current position by this amount (may be negative)
 	 */
 	skip(count: number): void {
 		this.seek(this.pos() + count);
 	}
 
 	/**
-	 * Should get a new reader which is independently seekable and optionally follows the given positioning constraints
+	 * Gets a new, independently seekable reader over [start, end) of this one.
+	 * The new reader must be closed separately.
 	 */
 	abstract slice(start?: number, end?: number): Reader;
 
 	/**
-	 * Gets a list of bytes at the current position
+	 * Reads exactly 'len' bytes at the current position and advances past them.
+	 * The returned buffer is never shared with the reader's internal storage.
 	 */
-	abstract readBytes(len: number): Promise<ArrayBuffer>;
+	abstract readBytes(len: number): Promise<Buffer>;
 
-	abstract readUint8(): Promise<number>;
-	abstract readUint16(): Promise<number>;
-	abstract readUint24(): Promise<number>;
-	abstract readUint32(): Promise<number>;
-	abstract readUint64(): Promise<number>;
-
-
-	async readStringU16(len: number): Promise<string> {
-		let buf = Buffer.from(await this.readBytes(len*2));
-		return buf.toString('utf16le');
+	async readUint8(): Promise<number> {
+		return (await this.readBytes(1)).readUInt8(0);
 	}
 
+	async readUint16(): Promise<number> {
+		return (await this.readBytes(2)).readUInt16LE(0);
+	}
+
+	async readUint24(): Promise<number> {
+		return (await this.readBytes(3)).readUIntLE(0, 3);
+	}
+
+	async readUint32(): Promise<number> {
+		return (await this.readBytes(4)).readUInt32LE(0);
+	}
+
+	/**
+	 * Reads an unsigned 64-bit integer. Throws if it can't be represented exactly as a JS number.
+	 */
+	async readUint64(): Promise<number> {
+		return readUint64LE(await this.readBytes(8), 0);
+	}
+
+	async readStringU16(len: number): Promise<string> {
+		return (await this.readBytes(len * 2)).toString('utf16le');
+	}
 }
 
 /**
- * Simple helper class for implementing a reader on top of a type that can read a node.js Buffer efficiently
+ * Reads an unsigned 64-bit little-endian integer from a buffer.
+ * Throws a RangeError instead of silently losing precision above 2^53.
  */
-export abstract class BufferBasedReader extends Reader {
-
-	abstract readBufferBytes(count: number): Promise<Buffer>;
-
-	async readBytes(n: number): Promise<ArrayBuffer> {
-		let buf = await this.readBufferBytes(n);
-		return ToArrayBuffer(buf);
+export function readUint64LE(buf: Buffer, offset: number): number {
+	let v = buf.readBigUInt64LE(offset);
+	if(v > BigInt(Number.MAX_SAFE_INTEGER)) {
+		throw new RangeError('64-bit value is too large: 0x' + v.toString(16));
 	}
 
-	async readUint8() {
-		return (await this.readBufferBytes(1)).readUInt8(0);
-	}
-
-	async readUint16() {
-		return (await this.readBufferBytes(2)).readUInt16LE(0);
-	}
-
-	async readUint24() {
-		return (await this.readBufferBytes(3)).readUIntLE(0, 3);
-	}
-
-	async readUint32() {
-		return (await this.readBufferBytes(4)).readUInt32LE(0);
-	}
-
-	async readUint64() {
-		let n = (await this.readBufferBytes(6)).readUIntLE(0, 6);
-		this.skip(2);
-		return n;
-	}
-
-}
-
-interface ReferenceCountedNumber {
-	val: number;
-	nrefs: number;
+	return Number(v);
 }
 
 
-// TODO: Mainly needs the fd to be reference counted and we need to implement endianness choice
-export class FileReader extends BufferBasedReader {
+interface SharedHandle {
+	handle: fs.FileHandle;
+	refs: number;
+}
 
-	private _fd: ReferenceCountedNumber;
+/**
+ * Reads from a file on disk. Files are always opened read-only.
+ *
+ * Slices share one OS file handle, which is closed once every slice and the original reader are closed.
+ */
+export class FileReader extends Reader {
+
+	private _shared: SharedHandle;
+	private _closed = false;
 	private _pos: number;
-
 	private _start: number;
 	private _end: number;
-	//private _len: number;
 
-	static async Create(filename: string) {
-		let fd = await fs.open(filename, 'r');
-		let stat = await fs.fstat(fd);
-		return new FileReader({ val: fd, nrefs: 1 }, 0, stat.size);
+	static async Create(filename: string): Promise<FileReader> {
+		let handle = await fs.open(filename, 'r');
+		try {
+			let stat = await handle.stat();
+			return new FileReader({ handle, refs: 1 }, 0, stat.size);
+		}
+		catch(e) {
+			await handle.close();
+			throw e;
+		}
 	}
 
-	private constructor(fd: ReferenceCountedNumber, start: number, end: number) {
+	private constructor(shared: SharedHandle, start: number, end: number) {
 		super();
+		this._shared = shared;
 		this._pos = start;
-		this._fd = fd;
 		this._start = start;
 		this._end = end;
 	}
@@ -142,58 +153,81 @@ export class FileReader extends BufferBasedReader {
 		this._pos = pos + this._start;
 	}
 
-	slice(start?: number, end?: number) {
-		// TODO: Main issue with this right now is that it doesn't reference count closes
-		// TODO: bounds check the offsets given?
-		this._fd.nrefs++;
-		return new FileReader(this._fd, this._start + (start || 0), end? this._start + end : this._end);
+	slice(start: number = 0, end?: number) {
+		this.checkOpen();
+
+		let len = this._end - this._start;
+		if(end === undefined) {
+			end = len;
+		}
+
+		if(start < 0 || end < start || end > len) {
+			throw new RangeError('Slice [' + start + ', ' + end + ') is outside of the reader (length ' + len + ')');
+		}
+
+		this._shared.refs++;
+		return new FileReader(this._shared, this._start + start, this._start + end);
 	}
 
-	async readBufferBytes(n : number): Promise<Buffer> {
-		var buf = Buffer.allocUnsafe(n);
-		if(this._pos + n > this._end) {
-			throw new Error('Overrunning file');
+	async readBytes(n: number): Promise<Buffer> {
+		this.checkOpen();
+		checkReadSize(n);
+
+		if(this._pos < this._start || this._pos + n > this._end) {
+			throw new RangeError('Read of ' + n + ' bytes at ' + this.pos() + ' is outside of the file (length ' + (this._end - this._start) + ')');
 		}
 
-		let res = await fs.read(this._fd.val, buf, 0, n, this._pos);
-		if(res.bytesRead !== n) {
-			throw new Error('Failed to read all bytes from file');
-		}
+		let buf = Buffer.allocUnsafe(n);
+		let pos = this._pos;
 
+		// Advance first so that concurrent reads on the same reader don't overlap
 		this._pos += n;
+
+		let done = 0;
+		while(done < n) {
+			let res = await this._shared.handle.read(buf, done, n - done, pos + done);
+			if(res.bytesRead === 0) {
+				throw new Error('Unexpected end of file while reading');
+			}
+			done += res.bytesRead;
+		}
+
 		return buf;
 	}
 
 	async close() {
-		this._fd.nrefs--;
-		if(this._fd.nrefs === 0) {
-			await fs.close(this._fd.val);
-			this._fd.val = -1;
+		if(this._closed) {
+			return;
+		}
+
+		this._closed = true;
+		this._shared.refs--;
+		if(this._shared.refs === 0) {
+			await this._shared.handle.close();
 		}
 	}
 
+	private checkOpen() {
+		if(this._closed) {
+			throw new Error('Reader is closed');
+		}
+	}
 }
 
 
-export class DataViewReader extends Reader {
-	_view: DataView;
-	_littleEndian: boolean;
+/**
+ * Reads from an in-memory buffer
+ */
+export class BufferReader extends Reader {
+	private _buf: Buffer;
+	private _pos = 0;
 
-	_pos = 0;
-
-	constructor(buf: ArrayBuffer|Buffer, endian: ReaderEndian) {
+	constructor(buf: Buffer) {
 		super();
-
-		// Get Node.js Buffer's underlying ArrayBuffer
-		if(buf instanceof Buffer) {
-			buf = ToArrayBuffer(buf);
-		}
-
-		this._view = new DataView(buf);
-		this._littleEndian = endian === ReaderEndian.LittleEndian;
+		this._buf = buf;
 	}
 
-	// Nicely handled by the gargabe collector
+	// Memory is handled by the garbage collector
 	async close() { }
 
 	pos() {
@@ -204,131 +238,93 @@ export class DataViewReader extends Reader {
 		this._pos = n;
 	}
 
-	slice(start?: number, end?: number) {
-		return new DataViewReader(
-			this._view.buffer.slice(start || 0, end),
-			this._littleEndian? ReaderEndian.LittleEndian : ReaderEndian.BigEndian
-		);
+	slice(start: number = 0, end?: number) {
+		if(end === undefined) {
+			end = this._buf.length;
+		}
+
+		if(start < 0 || end < start || end > this._buf.length) {
+			throw new RangeError('Slice [' + start + ', ' + end + ') is outside of the buffer (length ' + this._buf.length + ')');
+		}
+
+		return new BufferReader(this._buf.subarray(start, end));
 	}
 
 	async length() {
-		return this._view.byteLength;
+		return this._buf.length;
 	}
-	
+
 	async readBytes(n: number) {
-		let arr = this._view.buffer.slice(this._pos, this._pos + n);
-		if(arr.byteLength !== n) {
-			throw new Error('Overflowed buffer');
+		checkReadSize(n);
+
+		if(this._pos < 0 || this._pos + n > this._buf.length) {
+			throw new RangeError('Read of ' + n + ' bytes at ' + this._pos + ' is outside of the buffer (length ' + this._buf.length + ')');
 		}
 
+		let out = Buffer.from(this._buf.subarray(this._pos, this._pos + n));
 		this._pos += n;
-
-		return arr;
+		return out;
 	}
-
-	async readUint8() {
-		const val = this._view.getUint8(this._pos); this._pos += 1;
-		return val;
-	}
-
-	async readUint16() {
-		const val = this._view.getUint16(this._pos, this._littleEndian); this._pos += 2;
-		return val;
-	}
-
-	async readUint24() {
-		let arr = new ArrayBuffer(4);
-		let view = new DataView(arr);
-		view.setUint32(0, 0); // Clear the buffer
-
-		let off = this._littleEndian? 0 : 1;
-		for(let i = 0; i < 3; i++) {
-			view.setUint8(off + i, this._view.getUint8(this._pos++));
-		}
-
-		return view.getUint32(0, this._littleEndian);
-	}
-
-	async readUint32() {
-		const val = this._view.getUint32(this._pos, this._littleEndian); this._pos += 4;
-		return val;
-	}
-
-	async readUint64() {
-		let buf = Buffer.from(await this.readBytes(8));
-		return buf.readUIntLE(0, 6);
-		
-		// TODO
-		// NOTE: We assume that we are never dealing with values with more than 48bits of integer precision
-		const val = this._view.getFloat64(this._pos, this._littleEndian); this._pos += 8;
-		return val;
-	}
-
 }
 
+
 /**
- * A reader which is the concatenated version of many subreaders
+ * A reader made of several readers joined end to end.
  *
- * NOTE: We currently don't support gaps in the readers (although this would eventually be useful to account for missing data), although that could also be implemented elsewhere with a reader that returns all zeros, or errors out on reads
+ * It takes ownership of the readers it is given and closes them when it is closed.
+ *
+ * NOTE: Gaps between readers (e.g. missing volumes) aren't supported.
  */
-export class ConcatenatedReader extends BufferBasedReader {
+export class ConcatenatedReader extends Reader {
 
-	/**
-	 * Currently can only create one from several known length readers
-	 */
-	static async Create(readers: Reader[]) {
-
-		let c = new ConcatenatedReader();
+	static async Create(readers: Reader[]): Promise<ConcatenatedReader> {
+		let offsets: Array<{ start: number; end: number }> = [];
 
 		let pos = 0;
-		c._offsets = [];
 		for(let r of readers) {
 			let len = await r.length();
-
-			c._offsets.push({
-				start: pos,
-				end: pos + len
-			});
-
+			offsets.push({ start: pos, end: pos + len });
 			pos += len;
 		}
 
-		c._readers = readers.map((r) => r.slice());
-
-		return c;
+		return new ConcatenatedReader(readers, offsets);
 	}
 
-
 	private _pos = 0;
-
 	private _readers: Reader[];
-	private _offsets: Array<{ start: number; end: number }>
+	private _offsets: Array<{ start: number; end: number }>;
 
-
-	private constructor() {
+	private constructor(readers: Reader[], offsets: Array<{ start: number; end: number }>) {
 		super();
+		this._readers = readers;
+		this._offsets = offsets;
 	}
 
 	/**
-	 * Creates a new reader for the given reader concatenated to the end of this one
+	 * Creates a new reader made of this one followed by 'reader'. Neither this reader nor 'reader' is consumed.
 	 */
 	append(reader: Reader) {
-		return ConcatenatedReader.Create(this._readers.concat([reader]));
-	} 
+		return ConcatenatedReader.Create(
+			this._readers.map((r) => r.slice()).concat([ reader.slice() ])
+		);
+	}
 
-
-	// Nicely handled by the gargabe collector
-	close() {
-		return Promise.all(this._readers.map((r) => r.close())).then(() => {});
+	async close() {
+		await Promise.all(this._readers.map((r) => r.close()));
 	}
 
 	async length() {
-		return this._offsets[this._offsets.length - 1].end;
+		return this._offsets.length > 0 ? this._offsets[this._offsets.length - 1].end : 0;
 	}
 
-	async readBufferBytes(count: number) {
+	async readBytes(count: number): Promise<Buffer> {
+		checkReadSize(count);
 
-		// Searching for the starting index
+		if(count === 0) {
+			return Buffer.alloc(0);
+		}
+
+		// Find the reader holding the starting position
 		let idx = search(this._offsets, this._pos, (item, v) => {
 			if(item.end <= v) {
 				return -1;
@@ -342,43 +338,38 @@ export class ConcatenatedReader extends BufferBasedReader {
 		});
 
 		if(idx < 0) {
-			throw new Error('Start position not found in the reader');
+			throw new RangeError('Read at ' + this._pos + ' is outside of the reader');
 		}
 
 		let parts: Buffer[] = [];
-		while(count > 0 && idx < this._readers.length) {
-			let n = Math.min(this._offsets[idx].end, this._pos + count) - this._pos
+		let remaining = count;
+		let pos = this._pos;
+		while(remaining > 0 && idx < this._readers.length) {
+			let n = Math.min(this._offsets[idx].end, pos + remaining) - pos;
 
-			this._readers[idx].seek(this._pos - this._offsets[idx].start);
+			this._readers[idx].seek(pos - this._offsets[idx].start);
+			parts.push(await this._readers[idx].readBytes(n));
 
-			parts.push(Buffer.from(
-				await this._readers[idx].readBytes(n)
-			));
-
-			count -= n;
-			this._pos += n;
+			remaining -= n;
+			pos += n;
 			idx++;
 		}
 
-		if(count !== 0) {
-			throw new Error('Not all bytes could be read')
+		if(remaining !== 0) {
+			throw new RangeError('Read of ' + count + ' bytes at ' + this._pos + ' runs past the end of the reader');
 		}
 
-		return Buffer.concat(parts);
-
+		this._pos = pos;
+		return parts.length === 1 ? parts[0] : Buffer.concat(parts);
 	}
 
 	slice(start?: number, end?: number) {
 		if(start !== undefined || end !== undefined) {
-			throw new Error('Partial slices implemented on ConcatenatedReader');
+			throw new Error('Partial slices are not implemented on ConcatenatedReader');
 		}
 
-		let copy = new ConcatenatedReader();
-		copy._offsets = this._offsets;
-		copy._readers = this._readers.map((r) => r.slice());
-		return copy;
+		return new ConcatenatedReader(this._readers.map((r) => r.slice()), this._offsets);
 	}
-
 
 	pos() {
 		return this._pos;
@@ -387,7 +378,4 @@ export class ConcatenatedReader extends BufferBasedReader {
 	seek(n: number) {
 		this._pos = n;
 	}
-
-
 }
-

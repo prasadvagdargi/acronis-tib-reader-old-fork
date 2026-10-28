@@ -3,7 +3,7 @@ import { Box, BoxHandle, ReadBox } from './box';
 import { ReadRecord, ReadChunkHeader, ReadAllBoxes } from './record';
 import { ReadCompressedStream } from '../compression';
 import assert from 'assert';
-import { DataViewReader, ReaderEndian, Reader } from '../reader';
+import { BufferReader, Reader } from '../reader';
 import { CheckAllZeros } from '../utils';
 import { VolumeHeader } from '../volume';
 
@@ -47,7 +47,7 @@ export default class MacVolume extends Volume {
 			reader, record.inner_end - record.inner_start
 		);
 
-		let chunkReader = new DataViewReader(chunkData, ReaderEndian.LittleEndian);
+		let chunkReader = new BufferReader(chunkData);
 		
 		// TODO: We could use the header for safety bounding the compressed stream?
 		let chunk = await ReadChunkHeader(chunkReader);
@@ -104,7 +104,7 @@ export default class MacVolume extends Volume {
 				console.warn('Detected unknown data in padding after compressed stream');
 			}
 
-			let chunkReader = new DataViewReader(chunkData, ReaderEndian.LittleEndian);
+			let chunkReader = new BufferReader(chunkData);
 
 			let chunk = await ReadChunkHeader(chunkReader);
 	
