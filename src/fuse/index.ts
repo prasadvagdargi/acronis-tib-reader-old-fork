@@ -303,13 +303,18 @@ export class FuseHandler extends FuseReadOnlyHandler implements fuse.MountOption
 
 
 			for(var i = 0; i < file.handles.length; i++) {
+				// Stop once the request is filled so later blocks aren't decompressed for nothing
+				if(length <= 0) {
+					break;
+				}
+
 				let h = file.handles[i];
 				if(h.type !== 4 /* (BoxType.Blob & 0xff) */) { // TODO: Get rid of the need to do the "& 0xff"
 					continue;
 				}
-	
-	
-				if(position >= pos && pos < pos + h.size) {
+
+				// Only read from the block that contains the current position
+				if(position >= pos && position < pos + h.size) {
 					let start = position - pos;
 					let n = Math.min(length, h.size - start);
 	

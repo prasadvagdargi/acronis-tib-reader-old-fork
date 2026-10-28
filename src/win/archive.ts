@@ -97,7 +97,7 @@ export default class WindowsArchive extends Archive {
 		});
 
 		// Double check general sequencing stuff
-		for(var i = 0; i < parts.length; i++) {
+		for(let i = 0; i < parts.length; i++) {
 			if(parts[i].volume.header.sequence !== i + 1) {
 				throw new Error('Invalid sequence chain');
 			}
@@ -112,10 +112,11 @@ export default class WindowsArchive extends Archive {
 
 		// TODO: Eventually support missing slices a long as have at least one full slice that we can base all the sequential incremental slices in the chain on
 
-		// Read out slices
-		for(var i = 0; i < parts.length; i++) {
+		// Read out slices. Each slice takes the next run of volumes that share its slice number.
+		let i = 0;
+		while(i < parts.length) {
 			let vols: Windows2015Volume[] = [];
-			
+
 			let j = i;
 			for(; j < parts.length; j++) {
 				if(parts[j].desc.sliceNum !== slices.length + 1) {
@@ -135,6 +136,9 @@ export default class WindowsArchive extends Archive {
 
 			let s = await WindowsSlice.Open(vols, slices[slices.length - 1] || null);
 			slices.push(s);
+
+			// Continue after the volumes this slice used
+			i = j;
 		}
 
 

@@ -78,7 +78,7 @@ export class Windows2015Volume extends Volume {
 		// NOTE: This offset is relative to end of the header in the file in which it was read
 		let sliceSize = buf.readUIntLE(buf.length - this.header.length - 8, 6);
 
-		await this.reader.close();
+		await reader.close();
 
 		return {
 			isValid,

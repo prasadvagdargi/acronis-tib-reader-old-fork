@@ -85,6 +85,11 @@ export default class WindowsSlice extends Slice {
 			throw new Error('Could not validate slice trailer');
 		}
 
+		// The sector-by-sector trailer is parsed, but where it keeps the slice metadata isn't known yet
+		if(s.trailer.form === SliceForm.SectorBySector) {
+			throw new Error('Sector-by-sector backups are not supported yet');
+		}
+
 
 		// Finally grab the metadata
 		absoluteReader.seek(s.trailer.metaDataOffset);
@@ -185,7 +190,7 @@ export default class WindowsSlice extends Slice {
 			pos += 2;
 
 			let metaDataOff2Len = trailer[pos]; pos += 1;
-			let metaDataOff2 = trailer.readUIntLE(pos, metaDataOffLen); pos += metaDataOffLen;
+			let metaDataOff2 = trailer.readUIntLE(pos, metaDataOff2Len); pos += metaDataOff2Len;
 
 
 		}

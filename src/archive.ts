@@ -24,12 +24,12 @@ export default abstract class Archive {
 			throw new Error('Missing volume file');
 		}
 
-		// TODO: Don't forget to close this if any errors occur
 		let initialVolume = await Volume.Open(fileName);
 
 
 		let Gen = ArchiveImpls[initialVolume.header.version];
 		if(!Gen) {
+			await initialVolume.close();
 			throw new Error('No implementation for volume type: ' + initialVolume.header.version);
 		}
 
@@ -37,14 +37,15 @@ export default abstract class Archive {
 		// TODO: Verify headers/trailers in every single volume (in terms of checksums and the fact that they match in bytes)
 
 
+		// The archive keeps using the initial volume, so only close it here if opening fails.
+		// Otherwise Archive.close() is responsible for closing it.
 		try {
-			var arch = await Gen(initialVolume);
+			return await Gen(initialVolume);
 		}
-		finally {
+		catch(e) {
 			await initialVolume.close();
+			throw e;
 		}
-
-		return arch;
 	}
 
 	public static AddType(v: VolumeVersion, fn: ArchiveGenerator) {
