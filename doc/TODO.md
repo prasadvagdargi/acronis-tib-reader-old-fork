@@ -31,7 +31,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` partly done / blocked (reason given)
 - [x] `.gitattributes` so line endings stay LF on every OS
 - [x] `src/index.ts` public entry point that registers both formats
 - [x] `tib` command-line tool (`info`, `ls`, `cat`, `extract`, `verify`, `mount`)
-- [ ] GitHub Actions CI on Linux, macOS and Windows (Node 22 and 24)
+- [x] GitHub Actions CI on Linux, macOS and Windows (Node 22 and 24)
 
 
 3. Safety and robustness
@@ -84,9 +84,12 @@ Legend: `[x]` done, `[ ]` to do, `[~]` partly done / blocked (reason given)
 
 8. Tests
 --------
-- [ ] Unit tests: readers, search, AssertKeys, compression, 64-bit reads, cache, tree
-- [ ] Synthetic Windows archive fixture (incl. multi-volume) and Mac fixture
-- [ ] Integration tests against a real backup when `TIB_SAMPLE` points at one (skipped otherwise)
+- [x] Unit tests: readers, search, AssertKeys, compression, 64-bit reads, cache, paths, ranges
+- [x] Synthetic Windows backups (single, split, corrupted, encrypted, sector-by-sector) built by `test/helpers/windows-fixture.ts`; Mac tree/read logic tested with a stub volume
+- [ ] Synthetic Mac `.tib`/`.tib.metadata` builder (needs the Mac layout written up first)
+- [x] Integration test against a real backup when `TIB_SAMPLE` points at one (skipped otherwise)
+- [x] CLI tested end to end (exit codes, extract, verify on a corrupted backup)
+- [x] WebDAV server tested over HTTP; extraction tested with tricky names
 
 
 9. Documentation

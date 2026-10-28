@@ -146,6 +146,23 @@ Use `setWarningHandler()` to collect or silence them. Errors are thrown as `Form
 unknown data) or `NotSupportedError` (valid but unsupported, e.g. encrypted backups).
 
 
+Development
+-----------
+```bash
+npm test
+```
+runs the unit tests plus end-to-end tests on small synthetic backups that `test/helpers/windows-fixture.ts`
+generates (normal, split over several files, corrupted, encrypted, sector-by-sector). To also test against
+a real backup (only ever read), point `TIB_SAMPLE` at it, e.g. in PowerShell:
+```bash
+$env:TIB_SAMPLE = "D:\Backups\MyBackup_full_b1_s1_v1.tib"; npm test
+```
+CI runs the tests on Linux, macOS and Windows with Node 22 and 24 (`.github/workflows/ci.yml`).
+
+Project notes live in `doc/`: `TODO.md` (open work), `WORKLOG.md` (what was done and why),
+`Format-Windows.md` (format details).
+
+
 Versions
 --------
 

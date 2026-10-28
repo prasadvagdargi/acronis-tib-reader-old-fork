@@ -62,3 +62,15 @@ Step-by-step notes on the `modernize-and-fixes` branch, newest last. The open it
    - Files were first advertised as read-only; Windows kept that flag on copies, so they're now shown
      with the normal archive attribute (the server still refuses all writes).
    - Drive roots have no stored time; they now show the backup time instead of 1970.
+8. Tests and CI (53 tests, built-in `node:test`, no extra dependencies):
+   - `test/helpers/windows-fixture.ts` writes valid synthetic Windows backups from scratch (header
+     checksum, blocks with MD5 index, metadata records, config, listing, trailer, footer, optional
+     split into volumes). Covers the multi-volume bug, missing volumes, corrupted blocks, encrypted and
+     sector-by-sector refusals, and non-backup files.
+   - Every test that opens files deletes its temp folder afterwards; on Windows that fails if a file
+     handle leaked, so the suite doubles as a leak check.
+   - Mac logic is tested with a stub volume (tree building; reads at every offset across blocks,
+     the case the old FUSE bug broke).
+   - CLI tested by running it (exit codes, extract/overwrite, verify catching a corrupted block).
+   - `TIB_SAMPLE=<file>` runs an extra test against a real backup; passes on the 55 GB sample.
+   - GitHub Actions: Linux, macOS, Windows x Node 22, 24.
