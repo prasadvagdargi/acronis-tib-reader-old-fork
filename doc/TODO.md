@@ -8,6 +8,23 @@ that changes it.
 Legend: `[x]` done, `[ ]` to do, `[~]` partly done / blocked (reason given)
 
 
+Next steps (in priority order)
+------------------------------
+1. **Merge**: open a pull request from `modernize-and-fixes` into `master` and review it.
+2. **Windows drive without the 50 MB limit**: install WinFsp + rclone and test
+   `rclone mount :webdav: Z: --webdav-url http://127.0.0.1:8642/ --read-only` against `tib mount`;
+   document exact steps (needs an administrator for the WinFsp driver).
+3. **More real samples**: an incremental chain, a backup split into several files, an encrypted one and a
+   sector-by-sector one (True Image for Windows), plus any Mac backup. Run `TIB_SAMPLE=<file> npm test`
+   and `tib verify` on each, then fix what breaks and record findings in the format notes.
+4. **Native FUSE**: test `tib mount --fuse` on Linux and macOS with `@cocalc/fuse-native`.
+5. **Windows attributes in mounts**: show hidden/system flags and creation times (needs a per-entry
+   metadata read, so cache it).
+6. **Synthetic Mac fixture** following `Format-Mac.md`, so the Mac parser has end-to-end tests.
+7. **Sector-by-sector support** once a sample exists (expose the disk image as one file, readable by
+   standard tools).
+
+
 1. Bugs found in review
 -----------------------
 - [x] `Archive.Open` closed the volume the archive still uses (broke Mac file reads)

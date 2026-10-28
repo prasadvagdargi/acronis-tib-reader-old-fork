@@ -14,11 +14,11 @@ Status
 | Backup type | List files | Read / extract files | Verify | Tested on real files |
 |---|---|---|---|---|
 | Windows, file/folder backup (True Image 2015 and later) | Yes | Yes, with per-block MD5 checks | Yes | Yes: True Image 25.4 (2024), 55 GB |
-| Windows, split over several `.tib` files | Should work | Should work | Should work | No sample yet |
+| Windows, split over several `.tib` files | Yes | Yes | Yes | No sample yet (covered by generated test files) |
 | Windows, incremental chain | Should work | Should work | Should work | No sample yet |
 | Mac (all versions) | Should work | Should work | Should work | No (original samples are gone) |
 | Windows sector-by-sector (disk image) | No: clear "not supported" error | | | |
-| Encrypted backups | No: clear "not supported" error | | | |
+| Encrypted backups | Windows: clear "not supported" error. Mac: not detected | | | |
 | Windows True Image 2014 and older | Unknown | | | |
 
 
