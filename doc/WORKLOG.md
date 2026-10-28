@@ -41,3 +41,11 @@ Step-by-step notes on the `modernize-and-fixes` branch, newest last. The open it
    The old FUSE code was removed in this step and comes back as the new mount.
 5. Opened the real Windows backup with the parser: it opens in ~75 ms, reads the config and all
    9,212 listing entries. Reverse-engineered how file data is linked (see `Format-Windows.md`).
+6. Windows file reading, shared file-system view, block cache, resource cleanup.
+   Checked against the real backup (read-only):
+   - 8,538 files and 675 folders; total size matches the listing exactly (56,672,748,844 bytes)
+   - 4,211 blocks from 40 files spread across all sizes match their stored MD5s (~48 MB/s)
+   - random-offset reads equal sequential reads; reads past the end are clamped
+   - an extracted 25 MB zip passes its own CRC checks for all 66 entries; extracted JPEGs decode
+   - backup time read from the config record (2024-06-22 00:30:07 UTC) matches the file's write time
+   Extracted copies were written to a temporary folder and deleted afterwards.

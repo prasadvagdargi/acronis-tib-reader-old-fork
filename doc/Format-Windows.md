@@ -22,7 +22,10 @@ Slice trailer
 The last 4 bytes of the slice data identify its kind:
 - `2C 8A E1 94`: file-level backup. The 8 bytes before them are the offset of the metadata
   (config records, then the listing). Verified.
-- `2B 8A E1 94`: sector-by-sector disk backup. Not supported yet (no sample).
+- `2B 8A E1 94`: sector-by-sector disk backup. Not supported yet (no sample). From the original
+  author's notes: the 4 bytes before the magic are the trailer size; the trailer starts with 2 zero
+  bytes, then length-prefixed integers (1-byte length, then the value): a metadata offset, 7 unknown
+  bytes, the full uncompressed partition size, 2 unknown bytes, and a second metadata offset.
 
 
 Records
@@ -48,6 +51,27 @@ The metadata of an entry is: `102`, `1`, then `2` (folders) or `108` (files), th
 File data blobs are written before the metadata that points at them.
 
 
+Config (type 101)
+-----------------
+```
+0    68  unknown
+68   8   backup creation time, ms since 1970. Verified (2 s before the file's last write)
+76   16  unknown
+92   8   metadata offset (same as the slice trailer). Verified
+100  17  unknown
+117  8   total size of all files in the slice. Verified
+125  8   unknown
+133  8   metadata offset again. Verified
+141  8   unknown
+149  16  id (most likely of the slice)
+165  4   number of attributes
+169  ... attributes: uint32 key length + UTF-16 key, uint32 value length + UTF-16 XML value (BOM first)
+end  1   one extra byte
+```
+Attribute keys seen: `metainfo` (product, task id, computer id, compression, encryption),
+`product_info`, `task_id`. Unencrypted backups have `encryption value="none"`.
+
+
 RecordIndex (type 108)
 ----------------------
 ```
@@ -57,9 +81,14 @@ RecordIndex (type 108)
 20  32*N handles:
         8  offset of this block inside the file
         8  offset of the Blob record, from the start of the archive (after the header)
-        16 MD5 hash (of the decompressed block; to be confirmed)
+        16 MD5 hash of the decompressed block. Verified
 ...     a security descriptor follows (same layout as record type 2)
 ```
+Blocks are normally 256 KiB of the file. A block's slot ends where the next block starts (or at the
+total size); if its decompressed data is shorter, the rest of the slot is zeros (e.g. a 1 MiB journal
+file stored as one 4,591-byte block). Verified.
+
+Times (type 5): first value appears to be the creation time, second the modified time.
 
 
 Listing (type 103)
@@ -79,7 +108,7 @@ entries:
   uint64  size in bytes
   uint64  size again (difference unknown)
   uint64  offset of the entry's FileMetaStart record (from the start of the archive)
-  uint32  kind: 0x83 drive root, 0x80 folder (to be confirmed), 0 file
+  uint32  kind: 0x83 drive root, 0x80 folder, 0 file. Verified on all 9,212 entries
   uint64  offset of the FileMetaStart record again
   uint32  1
   uint32  unknown, same for every entry (volume id?)
