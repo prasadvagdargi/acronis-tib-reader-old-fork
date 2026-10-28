@@ -1,6 +1,8 @@
 import { ReadBox, Box } from './box';
 import { Reader } from '../reader';
 import assert from 'assert';
+import { warn } from '../log';
+import { FormatError } from '../errors';
 
 
 export interface Chunk {
@@ -29,7 +31,7 @@ export async function ReadChunkHeader(reader: Reader): Promise<Chunk> {
 	/*
 	// A record will only ever consist of a single chunk
 	if(end !== reader.length()) {
-		throw new Error('Chunk does not take up full record')
+		throw new FormatError('Chunk does not take up full record')
 	}
 	*/
 
@@ -68,7 +70,7 @@ async function ReadRecordHeader(reader: Reader): Promise<{ header_size: number; 
 
 	let flags = header[0];
 	if(flags !== 0x98 && flags !== 0x68) {
-		console.warn('Unknown record flags: ' + flags.toString(16));
+		warn('Unknown record flags: ' + flags.toString(16));
 	}
 
 	let header_size = header.readUIntLE(1, 3); // Uint24
@@ -80,7 +82,7 @@ async function ReadRecordTrailer(reader: Reader): Promise<{ trailer_size: number
 	let trailer = Buffer.from(await reader.readBytes(RECORD_TRAILER_SIZEOF));
 
 	if(trailer[0] !== 0x78) {
-		console.warn('Unknown trailer flags');
+		warn('Unknown trailer flags');
 	}
 
 	let trailer_size = trailer.readUIntLE(1, 3); // Uint24
@@ -107,11 +109,11 @@ export async function ReadRecord(reader: Reader, blockSize: number): Promise<Rec
 	let { trailer_size } = await ReadRecordTrailer(reader);
 	
 	if(header_size !== trailer_size) {
-		throw new Error('Invalid header/trailer')
+		throw new FormatError('Invalid header/trailer')
 	}
 
 	if(end % blockSize !== 0) {
-		console.warn('Record does not end at a block offset');
+		warn('Record does not end at a block offset');
 	}
 
 	return {
@@ -134,7 +136,7 @@ export async function ReverseReadRecord(reader: Reader, blockSize: number) {
 	reader.seek(inner_end);
 
 	if(end % blockSize !== 0) {
-		console.warn('Record does not end at a block offset');
+		warn('Record does not end at a block offset');
 	}
 
 	let { trailer_size } = await ReadRecordTrailer(reader);
@@ -148,7 +150,7 @@ export async function ReverseReadRecord(reader: Reader, blockSize: number) {
 	let inner_start = reader.pos();
 
 	if(header_size !== trailer_size) {
-		throw new Error('Invalid header/trailer')
+		throw new FormatError('Invalid header/trailer')
 	}
 	
 	return {

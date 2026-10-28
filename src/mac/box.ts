@@ -1,6 +1,7 @@
 import { FileEntry, ReadFileEntry } from './file_entry';
 import assert from 'assert';
 import { Reader } from '../reader';
+import { FormatError } from '../errors';
 
 
 // TODO: Start validating this again for all of the boxes instead of records
@@ -109,7 +110,7 @@ export async function ReadBox(reader: Reader): Promise<Box> {
 	
 	/*
 	if(magic !== BOX_MAGIC) { // XXX: Magic will be different depending on the file type
-		throw new Error('Invalid box');
+		throw new FormatError('Invalid box');
 	}
 	*/
 
@@ -125,7 +126,7 @@ export async function ReadBox(reader: Reader): Promise<Box> {
 	}
 	// But if we don't have enough bytes to represent the type of box, then it is definately wrong
 	else if(size < 2) {
-		throw new Error('Unexpected small box');
+		throw new FormatError('Unexpected small box');
 	}
 
 
@@ -150,7 +151,7 @@ export async function ReadBox(reader: Reader): Promise<Box> {
 	pos += bodySize;
 	if(data.length < bodyEnd) {
 		// This will happen if the buffer given doesn't have enough bytes to satisfy the full box
-		throw new Error('Underrunning box');
+		throw new FormatError('Underrunning box');
 	}
 	*/
 
@@ -285,7 +286,7 @@ export async function ReadBox(reader: Reader): Promise<Box> {
 		// NOTE: For a normal backup of just plain files, 'bodyPos == inner_start + 155' right here
 
 		if(!foundXml) {
-			throw new Error('Could not find the configuration xml');
+			throw new FormatError('Could not find the configuration xml');
 		}
 
 		let xmlSize = await reader.readUint16(); // Size of xml in bytes

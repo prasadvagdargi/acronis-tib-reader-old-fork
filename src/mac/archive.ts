@@ -1,14 +1,15 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import Archive from '../archive';
 import Volume, { VolumeVersion } from '../volume';
 import MacVolume from './volume';
 import { MacVolumeMetaFile, ParseMacVolumeMetaFile } from './meta';
 import { FileReader } from '../reader';
-import Slice from '../slice';
 import MacSlice from './slice';
 import { BoxType } from './box';
-import path from 'path';
 import { ParseConfigXML } from './config';
+import { FormatError } from '../errors';
+import { warn } from '../log';
 
 
 export class MacArchive extends Archive {
@@ -18,25 +19,24 @@ export class MacArchive extends Archive {
 			throw new Error('Called with wrong volume type');
 		}
 
-
-		// In this mode, we will have multiple slices represented by a single volume 
+		// In this mode, we will have multiple slices represented by a single volume
 		let metaFileName = initialVolume.fileName + '.metadata';
 
-		if(!(fs.existsSync(metaFileName))) {
-			throw new Error('Missing metafile');
+		if(!fs.existsSync(metaFileName)) {
+			throw new FormatError('Missing metadata file: ' + metaFileName);
 		}
 
-		let reader = await FileReader.Create(metaFileName); // TODO: Close this on failures (and after we are done parsing it entirely)
+		let reader = await FileReader.Create(metaFileName);
+		let meta: MacVolumeMetaFile;
+		try {
+			meta = await ParseMacVolumeMetaFile(reader);
+		}
+		finally {
+			await reader.close();
+		}
 
-		let meta = await ParseMacVolumeMetaFile(reader);
-
-		await reader.close();
-
-
-		
 		let name = path.basename(initialVolume.fileName, '.tib');
-		let volumes = [initialVolume];
-		
+
 		let slices: MacSlice[] = [];
 
 		for(let b of meta.boxes) {
@@ -47,22 +47,24 @@ export class MacArchive extends Archive {
 					b
 				);
 
-				let cfg = await ParseConfigXML(b.xml);
-				s.config = cfg;
-				
+				try {
+					s.config = await ParseConfigXML(b.xml);
+				}
+				catch(e: any) {
+					warn('Could not parse the configuration of backup point ' + (slices.length + 1) + ': ' + e.message);
+				}
+
 				slices.push(s);
 			}
 		}
 
-		return new MacArchive(
-			name, volumes, slices, meta
-		);
+		return new MacArchive(name, [initialVolume], slices, meta);
 	}
 
 
 	public metaFile: MacVolumeMetaFile;
 
-	constructor(name: string, volumes: Volume[], slices: Slice[], meta: MacVolumeMetaFile) {
+	constructor(name: string, volumes: Volume[], slices: MacSlice[], meta: MacVolumeMetaFile) {
 		super(name, slices, volumes);
 		this.metaFile = meta;
 	}

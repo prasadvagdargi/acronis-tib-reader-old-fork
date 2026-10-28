@@ -1,6 +1,7 @@
 import { SliceConfig } from '../slice';
 import { ParseXML, AssertKeys, AssertValidUUID } from '../utils';
 import assert from 'assert';
+import { FormatError } from '../errors';
 
 
 export async function ParseConfigXML(str: string): Promise<SliceConfig> {
@@ -14,7 +15,7 @@ export async function ParseConfigXML(str: string): Promise<SliceConfig> {
 	AssertKeys(obj, ['IncludePath', 'MachineId'], true);
 
 	if(!obj['MachineId']) {
-		throw new Error('Missing machine id');
+		throw new FormatError('Missing machine id');
 	}
 
 	let incs: string[]|undefined;

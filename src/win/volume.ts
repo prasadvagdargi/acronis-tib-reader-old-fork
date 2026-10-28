@@ -1,7 +1,6 @@
 import Volume, { VolumeVersion, VolumeHeader } from "../volume";
-import { ReadAllRecords } from './record';
-import { Reader } from '../reader';
-
+import { Reader, readUint64LE } from '../reader';
+import { warn } from '../log';
 
 
 /**
@@ -13,11 +12,11 @@ export interface VolumeFooter {
 	sliceSize: number; /**< Number of bytes in this slice (this number is counted as every byte after the headers up to the last meaninful byte in this last file) */
 }
 
-
+const FOOTER_SIZE = 48;
 
 
 export class Windows2015Volume extends Volume {
-	
+
 	static async OpenImpl(fileName: string, reader: Reader, header: VolumeHeader) {
 		return new Windows2015Volume(fileName, reader, header);
 	}
@@ -30,61 +29,43 @@ export class Windows2015Volume extends Volume {
 		return this.header.length; // Should always be 32
 	}
 
-	async readAll(outputFolder: string) {
-
-		let reader = this.reader.slice();
-
-		reader.seek(this.startOffset());
-
-		// TODO: We will need to extract this for the sake of being able to do random access
-	
-		let recs = await ReadAllRecords(reader);
-		
-		await reader.close();
-	}
-
-
 	async readFooter(): Promise<VolumeFooter> {
 
 		let reader = this.reader.slice();
 
-		let size = await reader.length();
-		if(size < 90) {
-			// Shouldn't be possible for this to be meaninfully possible
-			console.warn('Extremely small file');
-		}
-
-		if(size % this.header.blockSize !== 0) {
-			// Most likely an invalid file (did not finish being written)
-			console.warn('Non-aligned file (incomplete?)')
-		}
-
-
-		reader.seek(size - 48);
-
-		let buf = Buffer.from(await reader.readBytes(48));
-
-		let isValid = true;
-
-		// The end of the file should contain an exact mirror image of the header
-		for(var i = 0; i < this.header.length; i++) {
-			if(this.header.rawBytes[i] !== buf[buf.length - i - 1]) {
-				isValid = false;
-				break;
+		try {
+			let size = await reader.length();
+			if(size < this.header.length + FOOTER_SIZE) {
+				warn('Volume ' + this.fileName + ' is too small to have a footer');
+				return { isValid: false, sliceSize: 0, length: FOOTER_SIZE };
 			}
+
+			if(size % this.header.blockSize !== 0) {
+				// Most likely the backup did not finish being written
+				warn('Volume ' + this.fileName + ' is not block aligned (incomplete?)');
+			}
+
+			reader.seek(size - FOOTER_SIZE);
+
+			let buf = await reader.readBytes(FOOTER_SIZE);
+
+			// The end of the file should contain an exact mirror image of the header
+			let isValid = true;
+			for(let i = 0; i < this.header.length; i++) {
+				if(this.header.rawBytes[i] !== buf[buf.length - i - 1]) {
+					isValid = false;
+					break;
+				}
+			}
+
+			// Counted from the end of the header of the first volume of the slice
+			let sliceSize = readUint64LE(buf, buf.length - this.header.length - 8);
+
+			return { isValid, sliceSize, length: FOOTER_SIZE };
 		}
-
-		// NOTE: This is a 64bit number (possibly shorter, maybe safer to only read up-to the first zero)
-		// NOTE: This offset is relative to end of the header in the file in which it was read
-		let sliceSize = buf.readUIntLE(buf.length - this.header.length - 8, 6);
-
-		await reader.close();
-
-		return {
-			isValid,
-			sliceSize,
-			length: 48
-		};
+		finally {
+			await reader.close();
+		}
 	}
 
 }

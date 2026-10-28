@@ -1,22 +1,25 @@
-import Volume, { VolumeVersion } from '../volume';
+import Volume, { VolumeVersion, VolumeHeader } from '../volume';
 import { Box, BoxHandle, ReadBox } from './box';
 import { ReadRecord, ReadChunkHeader, ReadAllBoxes } from './record';
 import { ReadCompressedStream } from '../compression';
-import assert from 'assert';
 import { BufferReader, Reader } from '../reader';
 import { CheckAllZeros } from '../utils';
-import { VolumeHeader } from '../volume';
+import { FormatError } from '../errors';
+import { warn } from '../log';
+import { createBlockCache } from '../cache';
 
 
 /**
- * Represents the single .tib file stored for MacOS 
+ * Represents the single .tib file stored for MacOS
  */
 export default class MacVolume extends Volume {
-	
+
 	public static async OpenImpl(fileName: string, reader: Reader, header: VolumeHeader) {
 		return new MacVolume(fileName, reader, header);
 	}
 
+	// Decompressed records, by offset
+	private _cache = createBlockCache<number>();
 
 	/**
 	 * Gets the starting offset of actual records in this file
@@ -26,104 +29,104 @@ export default class MacVolume extends Volume {
 		return this.header.blockSize * 3;
 	}
 
-	async readBoxHandle(handle: BoxHandle): Promise<Box> {
+	/**
+	 * Decompresses the record holding a box (cached, since a record holds many boxes)
+	 */
+	private readRecordData(handle: BoxHandle): Promise<Buffer> {
+		return this._cache.getOrLoad(handle.record_start, async () => {
+			let reader = this.reader.slice();
+			try {
+				reader.seek(this.startOffset() + handle.record_start);
 
-		let reader = this.reader.slice();
+				let record = await ReadRecord(reader, this.header.blockSize);
 
-		// TODO: Deduplicate this code with the code in readAll
+				if(record.end - record.start !== handle.record_size) {
+					throw new FormatError('Handle record size mismatch with file');
+				}
 
-		reader.seek(this.startOffset() + handle.record_start);
+				reader.seek(record.inner_start);
 
-		let record = await ReadRecord(reader, this.header.blockSize);
-
-		if(record.end - record.start !== handle.record_size) {
-			throw new Error('Handle record size mismatch with file');
-		}
-
-		reader.seek(record.inner_start);
-
-		// TODO: For efficiency, this would ideally try to obtain a cached handle to this record assumming that the majority of reads will occur sequentially
-		let chunkData = await ReadCompressedStream(
-			reader, record.inner_end - record.inner_start
-		);
-
-		let chunkReader = new BufferReader(chunkData);
-		
-		// TODO: We could use the header for safety bounding the compressed stream?
-		let chunk = await ReadChunkHeader(chunkReader);
-
-		// TODO: This also implies that my size calculations are wrong
-		chunkReader.seek(handle.start - 5);
-
-		let box = await ReadBox(chunkReader);
-
-		// TODO: Need more robust closing even in the case of internal failures
-		await reader.close();
-
-		// TODO: Will need to refactor type extraction now
-		//assert.strictEqual(box.type & 0xff, handle.type & 0xff, 'Box read does not have the expected handle type');
-
-		return box;
+				return await ReadCompressedStream(reader, record.inner_end - record.inner_start);
+			}
+			finally {
+				await reader.close();
+			}
+		});
 	}
 
+	async readBoxHandle(handle: BoxHandle): Promise<Box> {
 
+		let chunkReader = new BufferReader(await this.readRecordData(handle));
 
-	// XXX: We want to support better decompression of all of this stuff for viewing purposes
-	// And support an adaptive parser which parses and layers and only fails specific pieces of the hierarchy
+		// TODO: We could use the header for safety bounding the compressed stream?
+		await ReadChunkHeader(chunkReader);
+
+		// TODO: Needing 5 here suggests the handle offsets are counted from a different point than assumed
+		chunkReader.seek(handle.start - 5);
+
+		// TODO: Check the box type against handle.type
+		return ReadBox(chunkReader);
+	}
+
 	/**
 	 * Reads every single record/box in the file from the beginning to the end
 	 * NOTE: Not advisable for large archives as this will store it all in memory
-	 * 
+	 *
 	 * This is mostly intented for verifying an entire file from beginning to end
 	 */
 	async readAll(): Promise<Box[]> {
 
 		let reader = this.reader.slice();
-		reader.seek(this.startOffset());
-	
-		let size = await reader.length();
+		try {
+			reader.seek(this.startOffset());
 
-		if(size % this.header.blockSize !== 0) {
-			console.warn('File not aligned to block multiples');
-		}
-	
-	
-		let allBoxes: Box[] = [];
+			let size = await reader.length();
 
-		while(reader.pos() < size) {
-		
-			let record = await ReadRecord(reader, this.header.blockSize);
-	
-			reader.seek(record.inner_start);
-
-			let chunkData = await ReadCompressedStream(
-				reader, record.inner_end - record.inner_start,
-			);
-
-			if(!(await CheckAllZeros(reader, record.inner_end - reader.pos()))) {
-				console.warn('Detected unknown data in padding after compressed stream');
+			if(size % this.header.blockSize !== 0) {
+				warn('File not aligned to block multiples');
 			}
 
-			let chunkReader = new BufferReader(chunkData);
+			let allBoxes: Box[] = [];
 
-			let chunk = await ReadChunkHeader(chunkReader);
-	
-			let boxes = await ReadAllBoxes(chunkReader, chunk);
-			allBoxes.push.apply(allBoxes, boxes);
+			while(reader.pos() < size) {
 
-			reader.seek(record.end);
+				let record = await ReadRecord(reader, this.header.blockSize);
+
+				reader.seek(record.inner_start);
+
+				let chunkData = await ReadCompressedStream(
+					reader, record.inner_end - record.inner_start,
+				);
+
+				if(!(await CheckAllZeros(reader, record.inner_end - reader.pos()))) {
+					warn('Detected unknown data in padding after compressed stream');
+				}
+
+				let chunkReader = new BufferReader(chunkData);
+
+				let chunk = await ReadChunkHeader(chunkReader);
+
+				let boxes = await ReadAllBoxes(chunkReader, chunk);
+				allBoxes.push(...boxes);
+
+				reader.seek(record.end);
+			}
+
+			if(reader.pos() !== size) {
+				throw new FormatError('Over/underrun of file');
+			}
+
+			return allBoxes;
 		}
-	
-		assert.strictEqual(reader.pos(), size, 'Over/underrun of file');
-
-		await reader.close();
-
-		return allBoxes;
+		finally {
+			await reader.close();
+		}
 	}
-	
 
+	override close() {
+		this._cache.clear();
+		return super.close();
+	}
 }
 
 Volume.AddType(VolumeVersion.Mac, MacVolume.OpenImpl);
-
-

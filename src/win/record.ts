@@ -1,68 +1,79 @@
 import { ReadCompressedStream } from '../compression';
-import assert from 'assert';
-import { Reader } from '../reader';
+import { Reader, readUint64LE } from '../reader';
+import { FormatError } from '../errors';
+import { warn } from '../log';
+
+// See doc/Format-Windows.md for the layouts parsed here
 
 
-// This seems to always be the first 8 bytes of RecordIndexes
+// Always the first 8 bytes of a RecordIndex
 const RECORD_INDEX_MAGIC = Buffer.from('0102001001000000', 'hex');
 
 export enum RecordType {
-	Config = 101, /**< Contains xml configuration data key-value pairs */
-	FirstFileMetaRecord = 102, /**< I don't know what this record contains but it is referenced by a single FileEntry and is followed by the rest fo the relevant  */
-	FileMetaA = 1, /**< Typically will follow the FirstFileMetaRecord */
-	FileMetaB = 2, /**< Typically will follow the FileMetaA */
-	FileMetaC = 5, /**< Typically will follow the FileMetaB */
-	Listing = 103, /**< Contains a list of all files/directories in the archive */
-	EndTrailer = 104, /**< Indicates the start of the end index that is referenced by the footer and holds a summary of where the important metadata blocks are located in the list (this means nothing else meaninful is left in the file. Generally we don't need to parse this if we are going forward as this should have been referenced already if we had loaded the footer of the file) */
-	RecordIndex = 108, /**< For regular files, this contains the index of where each record holding data for it is located */
-	Blob = 109, /**< Contains file data */
-	BlobSuffix = 110, /**< This is inserted after every single blob for a file has been written (usually empty but may contain metadata?) */
+	Attributes = 1, /**< uint32 Windows file attributes of an entry */
+	Security = 2, /**< Windows security descriptor of an entry (seen on folders and empty files) */
+	Times = 5, /**< Creation and modification time of an entry */
+	Config = 101, /**< XML key/value configuration of the slice */
+	FileMetaStart = 102, /**< First record of every entry's metadata */
+	Listing = 103, /**< List of every file and folder in the slice */
+	EndTrailer = 104, /**< End of the metadata */
+	RecordIndex = 108, /**< Where each block of a file's data is stored */
+	Blob = 109, /**< A block of file data */
+	BlobSuffix = 110, /**< Written after the last block of each file (empty) */
 }
 
-// Everything we have no serious parser for yet
-const UnparsedRecordTypes: UnparsedRecordTypesType[] = [
-	RecordType.FirstFileMetaRecord,
-	RecordType.FileMetaA, RecordType.FileMetaB, RecordType.FileMetaC,
-	RecordType.BlobSuffix
-];
+/**
+ * Value of the 'kind' field of a listing entry
+ */
+export enum EntryKind {
+	File = 0,
+	Folder = 0x80,
+	Root = 0x83, /**< Root of a backed up drive, e.g. "G:" */
+}
 
-export { UnparsedRecordTypes };
+/**
+ * Windows FILE_ATTRIBUTE_* flags (record type 1)
+ */
+export const FileAttribute = {
+	ReadOnly: 0x1,
+	Hidden: 0x2,
+	System: 0x4,
+	Directory: 0x10,
+	Archive: 0x20,
+} as const;
 
-// The above array in typescript form
-type UnparsedRecordTypesType = RecordType.FirstFileMetaRecord |
-RecordType.FileMetaA | RecordType.FileMetaB | RecordType.FileMetaC |
-RecordType.BlobSuffix;
+// Records stored with a raw deflate stream followed by 4 unknown bytes (probably a checksum)
+const RAW_DEFLATE_TYPES = new Set<number>([
+	RecordType.Attributes, RecordType.Security, RecordType.Times, RecordType.Config,
+	RecordType.FileMetaStart, RecordType.Listing
+]);
+
+// Records stored as a zlib stream
+const ZLIB_TYPES = new Set<number>([ RecordType.Blob, RecordType.BlobSuffix, RecordType.RecordIndex ]);
+
 
 export interface ConfigAttribute {
 	key: string;
 	value: string;
 }
 
-export interface FileEntry {
-	path: string;
+export interface ListingEntry {
+	path: string; /**< Full path with '/' separators, e.g. "G:/Users/me/file.txt" */
 	name: string;
-	shortName: string;
-
-	time: Date;
-
-	fileSize: number; // NOTE: If there are zeros at the end of the file, then i think that it will clip them and assume that everything overflowing the available data is zeros
-	fileSize2: number;
-
-	metaOffset: number; /**< Offset relative to after the header of the RecordType.FirstFileMetaRecord for this entry. Reading sequential  */
-
+	kind: EntryKind;
+	mtime: Date;
+	size: number;
+	metaOffset: number; /**< Offset of the entry's FileMetaStart record, from the start of the archive (after the header) */
 }
 
-
 export interface RecordHandle {
-	startOffset: number; /**< Offset relative to the start of the uncompressed file at which this record stores data (should be used along with the end offset for fast seeking) */
-
-	recordOffset: number; /**< Offset in the archive relative to the end of the header at which this record starts */
-
-	hash: Buffer; /**< 16byte MD5 hash of the decompressed block */
+	startOffset: number; /**< Offset inside the file where this block starts */
+	recordOffset: number; /**< Offset of the Blob record, from the start of the archive (after the header) */
+	hash: Buffer; /**< MD5 of the decompressed block */
 }
 
 interface OpaqueRecord {
-	// Absolute file extends of this record
+	// Position of this record in the reader it was read from
 	start: number;
 	end: number;
 }
@@ -70,6 +81,8 @@ interface OpaqueRecord {
 export interface ConfigRecord extends OpaqueRecord {
 	type: RecordType.Config;
 	attrs: ConfigAttribute[];
+	creationTime?: Date; /**< When the backup was made */
+	id?: Buffer; /**< 16 byte identifier (most likely of the slice) */
 }
 
 export interface IndexRecord extends OpaqueRecord {
@@ -78,17 +91,24 @@ export interface IndexRecord extends OpaqueRecord {
 	handles: RecordHandle[];
 }
 
+export interface AttributesRecord extends OpaqueRecord {
+	type: RecordType.Attributes;
+	attributes: number;
+}
+
+export interface TimesRecord extends OpaqueRecord {
+	type: RecordType.Times;
+	created: Date;
+	modified: Date;
+}
+
 export interface EndTrailerRecord extends OpaqueRecord {
 	type: RecordType.EndTrailer;
 }
 
 export interface ListingRecord extends OpaqueRecord {
 	type: RecordType.Listing;
-	files: FileEntry[];
-}
-
-export interface UnparsedRecord extends OpaqueRecord {
-	type: UnparsedRecordTypesType;
+	files: ListingEntry[];
 }
 
 export interface BlobRecord extends OpaqueRecord {
@@ -96,14 +116,19 @@ export interface BlobRecord extends OpaqueRecord {
 	data: Buffer;
 }
 
-export type Record = ConfigRecord | IndexRecord | EndTrailerRecord | ListingRecord | BlobRecord | UnparsedRecord;
+export interface UnparsedRecord extends OpaqueRecord {
+	type: RecordType.FileMetaStart | RecordType.Security | RecordType.BlobSuffix;
+}
+
+export type Record = ConfigRecord | IndexRecord | AttributesRecord | TimesRecord | EndTrailerRecord |
+	ListingRecord | BlobRecord | UnparsedRecord;
 
 
 /**
- * Read all records in a stream until we hit the end of that stream or we hit the end marker
+ * Read all records until the end of the reader or the end marker
  */
 export async function ReadAllRecords(reader: Reader): Promise<Record[]> {
-	let recs: Record[] = []
+	let recs: Record[] = [];
 	let size = await reader.length();
 
 	while(reader.pos() < size) {
@@ -117,206 +142,236 @@ export async function ReadAllRecords(reader: Reader): Promise<Record[]> {
 	return recs;
 }
 
+/**
+ * Reads the type of the record at the current position without moving the reader
+ */
+export async function PeekRecordType(reader: Reader): Promise<number> {
+	let pos = reader.pos();
+	let type = await reader.readUint8();
+	reader.seek(pos);
+	return type;
+}
+
 export async function ReadRecord(reader: Reader): Promise<Record> {
 
 	let start = reader.pos();
 
 	let type = await reader.readUint8();
 
-	let data: Buffer;
-
 	if(type === RecordType.EndTrailer) {
-		return {
-			start,
-			end: reader.pos(),
-			type
-		};
+		return { start, end: reader.pos(), type };
 	}
-	// Zlib stream encoded
-	if(type === RecordType.Blob || type === RecordType.BlobSuffix || type === RecordType.RecordIndex) {
+
+	let data: Buffer;
+	if(ZLIB_TYPES.has(type)) {
 		data = await ReadCompressedStream(reader, -1);
 	}
-	// Raw deflate encoded
-	else if(type === RecordType.Config || type === RecordType.FirstFileMetaRecord || type === RecordType.Listing || type === RecordType.FileMetaA || type === RecordType.FileMetaB || type === RecordType.FileMetaC) {
+	else if(RAW_DEFLATE_TYPES.has(type)) {
 		data = await ReadCompressedStream(reader, -1, true);
 
-		/*
-		let targetSum = ComputeAdler32(buf);
-		let checkSum = await reader.readUint32();
-
-		console.log(targetSum, checkSum);
-		*/
-
-		// 4 byte checksum of something?
+		// 4 bytes of something checksum-like (not an Adler-32 of the data)
 		reader.skip(4);
 	}
 	else {
-		// NOTE: We currently don't know of any record types that aren't compressed 
-		throw new Error('Unknown item type');
+		throw new FormatError('Unknown record type ' + type + ' at ' + start);
 	}
 
+	let end = reader.pos();
 
-	let dataPos = 0;
+	switch(type) {
+		case RecordType.Blob:
+			return { start, end, type, data };
 
-	function readU16(len: number) {
-		let str = data.slice(dataPos, dataPos + (len*2)).toString('utf16le');
-		dataPos += len*2;
-		return str;	
-	}
+		case RecordType.Config:
+			return { start, end, type, ...parseConfig(data) };
 
-	if(type === RecordType.Blob) {
-		return {
-			start, end: reader.pos(),
-			type,
-			data
-		};
-	}
-	else if(type === RecordType.Config) {
+		case RecordType.Listing:
+			return { start, end, type, files: parseListing(data) };
 
-		// XXX: No idea yet what the first 169 bytes do
-		dataPos = 165;
+		case RecordType.RecordIndex:
+			return { start, end, type, ...parseIndex(data) };
 
-		// TODO: Double check that we read exactly this many
-		let numAttribs = data.readUInt32LE(dataPos); dataPos += 4;
+		case RecordType.Attributes:
+			if(data.length < 4) {
+				throw new FormatError('Attributes record too short at ' + start);
+			}
+			return { start, end, type, attributes: data.readUInt32LE(0) };
 
-		let attrs: ConfigAttribute[] = [];
-
-		// NOTE: Usually there seems to be one extra byte at the end all the time
-		while(dataPos < data.length - 1) {
-			let keyLength = data.readUInt32LE(dataPos); dataPos += 4;
-			let key = readU16(keyLength);
-
-			let valLength = data.readUInt32LE(dataPos); dataPos += 4;
-			let val = readU16(valLength);// NOTE: the first 2 bytes of this buffer are usually the 0xfffe byte order marker
-
-			attrs.push({
-				key: key,
-				value: val
-			});
-		}
-
-		// TODO: What is the last byte for?
-		assert.strictEqual(dataPos + 1, data.length);
-
-		assert.strictEqual(attrs.length, numAttribs);
-
-		return {
-			start, end: reader.pos(),
-			type,
-			attrs,
-		};
-	}
-	else if(type === RecordType.Listing) {
-
-		dataPos = 0;
-
-
-		let numEntries = data.readUInt32LE(dataPos); dataPos += 4;
-
-		let files: FileEntry[] = [];
-
-		while(dataPos < data.length) {
-
-			let pathLength = data.readUInt32LE(dataPos); dataPos += 4;
-			let path = readU16(pathLength);
-
-			// Some uint32
-			dataPos += 4;
-
-			let nameLength = data.readUInt32LE(dataPos); dataPos += 4;
-			let name = readU16(nameLength);
-
-			let shortNameLength = data.readUInt32LE(dataPos); dataPos += 4;
-			let shortName = readU16(shortNameLength);
-
-			let timeRaw = data.readUIntLE(dataPos, 6); dataPos += 8;
-			let time = new Date(timeRaw);
-
-			dataPos += 4;
-
-
-			// TODO: What is the difference between these?
-			let fileSize = data.readUIntLE(dataPos, 6); dataPos += 8;
-			let fileSize2 = data.readUIntLE(dataPos, 6); dataPos += 8;
-
-			let metaOffset = data.readUIntLE(dataPos, 6); dataPos += 8;
-
-
-			dataPos += 38;
-
-
-			let entry: FileEntry = {
-				path,
-				name,
-				shortName,
-				time,
-				fileSize,
-				fileSize2,
-				metaOffset
+		case RecordType.Times:
+			if(data.length < 16) {
+				throw new FormatError('Times record too short at ' + start);
+			}
+			return {
+				start, end, type,
+				created: new Date(readUint64LE(data, 0)),
+				modified: new Date(readUint64LE(data, 8))
 			};
 
-			files.push(entry);
-		}
-
-		assert.strictEqual(files.length, numEntries);
-		assert.strictEqual(dataPos, data.length);
-
-		return {
-			start, end: reader.pos(),
-			type,
-			files
-		};
-	}
-	else if(type === RecordType.RecordIndex) {
-
-		dataPos = 0;
-
-		assert(RECORD_INDEX_MAGIC.equals(data.slice(0, 8)), 'Bad record index magic');
-		dataPos += 8;
-
-		// Uncompressed of all data records in this index (should be the same as the file size)
-		let totalSize = data.readUIntLE(dataPos, 6); dataPos += 8;
-
-		let numHandles = data.readUInt32LE(dataPos); dataPos += 4;
-
-		let handles: RecordHandle[] = [];
-
-		for(var i = 0; i < numHandles; i++) {
-
-			let startOffset = data.readUIntLE(dataPos, 6); dataPos += 8;
-			let recordOffset = data.readUIntLE(dataPos, 6); dataPos += 8;
-			let hash = data.slice(dataPos, dataPos + 16); dataPos += 16;				
-
-			let handle: RecordHandle = {
-				startOffset,
-				recordOffset,
-				hash
-			};
-
-			handles.push(handle);
-		}
-
-		// TODO: There are usually 204 bytes after the handles which still don't have any known meaning
-		// ^ Last 24 bytes of these are always the exact same as the first 24 bytes of the index
-		// The rest of the bytes before these seem to always be constant across indexes in the same archive at the least
-
-		return {
-			start, end: reader.pos(),
-			type,
-			handles,
-			totalSize
-		};
-	}
-	// TODO: Annoyingly this doesn't reduce the type of 'type' so we can't type check that we have all members of the RecordType enum handled
-	else if(UnparsedRecordTypes.indexOf(type as UnparsedRecordTypesType) >= 0) {
-		return {
-			start, end: reader.pos(),
-			type: type as UnparsedRecordTypesType
-		};
+		case RecordType.FileMetaStart:
+		case RecordType.Security:
+		case RecordType.BlobSuffix:
+			return { start, end, type };
 	}
 
-	throw new Error('Unknown record type: ' + type);
-
+	throw new FormatError('Unhandled record type ' + type + ' at ' + start);
 }
 
 
+function readU16String(data: Buffer, pos: number, len: number): string {
+	if(pos + len * 2 > data.length) {
+		throw new FormatError('String runs past the end of its record');
+	}
+
+	return data.subarray(pos, pos + len * 2).toString('utf16le');
+}
+
+function stripNul(s: string) {
+	let i = s.indexOf('\0');
+	return i >= 0 ? s.slice(0, i) : s;
+}
+
+
+// Offsets inside the config record before the attribute list
+const CONFIG_CREATION_TIME = 68;
+const CONFIG_ID = 149;
+const CONFIG_NUM_ATTRS = 165;
+
+function parseConfig(data: Buffer): { attrs: ConfigAttribute[]; creationTime?: Date; id?: Buffer } {
+	if(data.length < CONFIG_NUM_ATTRS + 4) {
+		throw new FormatError('Config record too short');
+	}
+
+	let creationTime: Date | undefined;
+	try {
+		let ms = readUint64LE(data, CONFIG_CREATION_TIME);
+		if(ms > 0) {
+			creationTime = new Date(ms);
+		}
+	}
+	catch(e) {
+		warn('Config record has an unreadable creation time');
+	}
+
+	let id = Buffer.from(data.subarray(CONFIG_ID, CONFIG_ID + 16));
+
+	let pos = CONFIG_NUM_ATTRS;
+	let numAttribs = data.readUInt32LE(pos); pos += 4;
+
+	let attrs: ConfigAttribute[] = [];
+
+	// There is always one extra byte at the end
+	while(pos < data.length - 1) {
+		let keyLength = data.readUInt32LE(pos); pos += 4;
+		let key = readU16String(data, pos, keyLength); pos += keyLength * 2;
+
+		let valLength = data.readUInt32LE(pos); pos += 4;
+		// The value usually starts with a 0xFFFE byte order mark
+		let value = readU16String(data, pos, valLength); pos += valLength * 2;
+
+		attrs.push({ key: stripNul(key), value: value.replace(/^\uFEFF/, '') });
+	}
+
+	if(pos + 1 !== data.length || attrs.length !== numAttribs) {
+		warn('Config record has ' + attrs.length + ' attributes, expected ' + numAttribs);
+	}
+
+	return { attrs, creationTime, id };
+}
+
+
+function parseListing(data: Buffer): ListingEntry[] {
+	let pos = 0;
+
+	let numEntries = data.readUInt32LE(pos); pos += 4;
+
+	let files: ListingEntry[] = [];
+
+	while(pos < data.length) {
+		let pathLength = data.readUInt32LE(pos); pos += 4;
+		let path = stripNul(readU16String(data, pos, pathLength)); pos += pathLength * 2;
+
+		// Size of the rest of the entry, in 2-byte units
+		let restSize = data.readUInt32LE(pos) * 2; pos += 4;
+		let restEnd = pos + restSize;
+		if(restEnd > data.length) {
+			throw new FormatError('Listing entry runs past the end of the listing');
+		}
+
+		let nameLength = data.readUInt32LE(pos); pos += 4;
+		let name = stripNul(readU16String(data, pos, nameLength)); pos += nameLength * 2;
+
+		// The name again with a NUL and some extra units whose purpose is unknown
+		let namesLength = data.readUInt32LE(pos); pos += 4;
+		pos += namesLength * 2;
+
+		let mtime = readUint64LE(data, pos); pos += 8;
+
+		pos += 4; // Unknown (looks like a hash)
+
+		let size = readUint64LE(data, pos); pos += 8;
+		pos += 8; // Size again (always equal so far)
+
+		let metaOffset = readUint64LE(data, pos); pos += 8;
+
+		let kind = data.readUInt32LE(pos); pos += 4;
+
+		if(pos > restEnd) {
+			throw new FormatError('Listing entry for ' + path + ' is shorter than expected');
+		}
+
+		if(kind !== EntryKind.File && kind !== EntryKind.Folder && kind !== EntryKind.Root) {
+			warn('Unknown listing entry kind 0x' + kind.toString(16) + ' for ' + path);
+		}
+
+		files.push({
+			path,
+			name,
+			kind,
+			mtime: new Date(mtime),
+			size,
+			metaOffset
+		});
+
+		// The remaining fields (meta offset again, a constant id and zero padding) aren't needed
+		pos = restEnd;
+	}
+
+	if(files.length !== numEntries) {
+		throw new FormatError('Listing has ' + files.length + ' entries, expected ' + numEntries);
+	}
+
+	return files;
+}
+
+
+function parseIndex(data: Buffer): { totalSize: number; handles: RecordHandle[] } {
+	if(data.length < 20 || !RECORD_INDEX_MAGIC.equals(data.subarray(0, 8))) {
+		throw new FormatError('Bad record index magic');
+	}
+
+	let pos = 8;
+
+	// Uncompressed size of the file
+	let totalSize = readUint64LE(data, pos); pos += 8;
+
+	let numHandles = data.readUInt32LE(pos); pos += 4;
+
+	if(pos + numHandles * 32 > data.length) {
+		throw new FormatError('Record index is shorter than its handle count');
+	}
+
+	let handles: RecordHandle[] = [];
+	for(let i = 0; i < numHandles; i++) {
+		let startOffset = readUint64LE(data, pos); pos += 8;
+		let recordOffset = readUint64LE(data, pos); pos += 8;
+		let hash = Buffer.from(data.subarray(pos, pos + 16)); pos += 16;
+
+		handles.push({ startOffset, recordOffset, hash });
+	}
+
+	// A security descriptor follows the handles (not needed for reading)
+
+	handles.sort((a, b) => a.startOffset - b.startOffset);
+
+	return { totalSize, handles };
+}

@@ -1,4 +1,5 @@
 import Volume from './volume';
+import { SnapshotFS } from './fs/types';
 
 
 export interface ProductInfo {
@@ -28,17 +29,19 @@ export interface SliceConfig {
 
 
 /**
+ * One backup point in time. Full backups have no parent; incremental ones build on their parent.
+ *
  * NOTE: Each version of the format will have a subclass of this that caches volume specific details on the slice
  */
 abstract class Slice {
 
 	public parent: Slice|null;
 	public volumes: Volume[];
-	
+
 	public abstract get id(): Buffer;
 	public abstract get creationTime(): Date;
 
-	// TODO: We also want to verify that the xml configuration description matches the sniffed settings (in terms of include paths, compression, and encryption which must all be known before we could ever read the xml)
+	// TODO: Also verify that the xml configuration matches the sniffed settings (include paths, compression, encryption)
 	public abstract get config(): SliceConfig;
 
 	protected constructor(volumes: Volume[], parent: Slice|null) {
@@ -46,14 +49,12 @@ abstract class Slice {
 		this.parent = parent;
 	}
 
+	/**
+	 * Read-only view of the files in this backup point
+	 */
+	public abstract openFileSystem(): Promise<SnapshotFS>;
+
 	public abstract close() : Promise<void>;
-
-
-	// TODO: Also sufficient methods to abstract away FUSE
-
-	// TODO: Possibly also a method of getting back the path delimiter
 }
 
 export default Slice;
-
-

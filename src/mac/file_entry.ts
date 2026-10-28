@@ -1,6 +1,8 @@
 import assert from 'assert';
 import { BoxHandle } from './box';
 import { Reader } from '../reader';
+import { warn } from '../log';
+import { FormatError } from '../errors';
 
 
 export enum FileType {
@@ -133,7 +135,7 @@ export async function ReadFileEntry(reader: Reader): Promise<FileEntry> {
 	let isFile = fileType === FileType.Regular;
 	if(!isFile && !isDirectory) {
 		// TODO: In this case, we should just skip the file entirely instead of guessing the struct sizes
-		console.warn('Unknown file type:', fileType);
+		warn('Unknown file type: ' + fileType);
 	}
 
 	reader.skip(3);
@@ -191,7 +193,7 @@ export async function ReadFileEntry(reader: Reader): Promise<FileEntry> {
 	// Skip 4 FF bytes (end of entry indicator)
 	// NOTE: These are sometimes not included
 	// TODO: Verify that we got the right bytes
-	await reader.skip(4);
+	reader.skip(4);
 
 	let end = isFile? extent : reader.pos();
 
@@ -225,7 +227,7 @@ export async function ReadFileEntry(reader: Reader): Promise<FileEntry> {
 		return e;
 	}
 
-	throw new Error('Failed to create entry: Unknown type');
+	throw new FormatError('Failed to create entry: Unknown type');
 }
 
 

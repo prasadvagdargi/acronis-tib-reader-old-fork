@@ -2,6 +2,8 @@ import { ConfigRecord } from './record';
 import { SliceConfig, ProductInfo } from '../slice';
 import { ParseXML, AssertKeys, AssertValidNumber, AssertValidUUID } from '../utils';
 import assert from 'assert';
+import { warn } from '../log';
+import { FormatError } from '../errors';
 
 
 export function parseProductInfoTag(obj: any, config: SliceConfig) {
@@ -40,7 +42,7 @@ export function parseProductInfoTag(obj: any, config: SliceConfig) {
 
 	if(config.productinfo) {
 		if(JSON.stringify(config.productinfo) !== JSON.stringify(info)) {
-			throw new Error('Mismatching productinfo metadata');
+			throw new FormatError('Mismatching productinfo metadata');
 		}
 	}
 
@@ -55,7 +57,7 @@ export function parseTaskIdTag(obj: any, config: SliceConfig) {
 	AssertValidUUID(id);
 
 	if(config.task_id && config.task_id !== id) {
-		throw new Error('Mismatch in task_id');
+		throw new FormatError('Mismatch in task_id');
 	}
 
 	config.task_id = id;
@@ -80,7 +82,7 @@ export function parseMetadataTag(obj: any, config: SliceConfig) {
 	AssertValidUUID(id);
 
 	if(config.machine_id && config.machine_id !== id) {
-		throw new Error('Mismatch in computer_id');
+		throw new FormatError('Mismatch in computer_id');
 	}
 
 	config.machine_id = id;
@@ -91,7 +93,7 @@ export function parseMetadataTag(obj: any, config: SliceConfig) {
 
 	let comp_level = comp['$']['value'];
 	if(config.compression && config.compression !== comp_level) {
-		throw new Error('Mismatch in compresion level');
+		throw new FormatError('Mismatch in compresion level');
 	}
 
 	config.compression = comp_level;
@@ -102,7 +104,7 @@ export function parseMetadataTag(obj: any, config: SliceConfig) {
 
 	let enc_level = enc['$']['value'];
 	if(config.encryption && config.encryption !== enc_level) {
-		throw new Error('Mismatch in encrpytion level');
+		throw new FormatError('Mismatch in encrpytion level');
 	}
 
 	config.encryption = enc_level;
@@ -133,7 +135,7 @@ export async function ParseConfigRecord(r: ConfigRecord, config: SliceConfig): P
 			parseTaskIdTag(obj['task_id'], config);
 		}
 		else {
-			throw new Error('Unknown config key: ' + a.key);
+			warn('Unknown config key: ' + a.key);
 		}
 	}
 

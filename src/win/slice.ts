@@ -1,8 +1,13 @@
+import fs from 'node:fs';
 import Slice, { SliceConfig } from '../slice';
-import { ListingRecord, ReadAllRecords, RecordType } from './record';
-import { VolumeFooter, Windows2015Volume } from './volume';
+import { ListingRecord, ReadRecord, RecordType } from './record';
+import { Windows2015Volume } from './volume';
 import { ConcatenatedReader, Reader } from '../reader';
 import { ParseConfigRecord } from './config';
+import { FormatError, NotSupportedError } from '../errors';
+import { warn } from '../log';
+import { createBlockCache, LRUCache } from '../cache';
+import { WindowsFS } from './fs';
 
 
 // TODO: windows slices will need to store the type 'inc'/'full'
@@ -14,7 +19,7 @@ export enum SliceForm {
 }
 
 /**
- * Always located at the very end of each slice and indicates where in the archive the metadata for this slice starts 
+ * Always located at the very end of each slice and indicates where in the archive the metadata for this slice starts
  */
 export interface SliceTrailer {
 	isValid: boolean;
@@ -22,106 +27,89 @@ export interface SliceTrailer {
 	metaDataOffset: number; /**< This will be the offset of the RecordType.Config block relative to the start of the archive (skipping all headers) such that each this slice starts at the sum of all sliceSizes before this one */
 }
 
+const FILE_SYSTEM_MAGIC = Buffer.from('2C8AE194', 'hex');
+const SECTOR_BY_SECTOR_MAGIC = Buffer.from('2B8AE194', 'hex');
 
 
 export default class WindowsSlice extends Slice {
 
 	static async Open(volumes: Windows2015Volume[], parent: WindowsSlice|null): Promise<WindowsSlice> {
-		
-		// TODO: We can also detect which files are the end of a slice without the filenames by looking for which one has a valid footer (which combined with having valid footer offsets could be a rebost check)
 
-		let footer = await volumes[volumes.length - 1].readFooter();
+		// TODO: We can also detect which files are the end of a slice without the filenames by looking for which one has a valid footer (which combined with having valid footer offsets could be a robust check)
+
+		let lastVolume = volumes[volumes.length - 1];
+		let footer = await lastVolume.readFooter();
 		if(!footer.isValid) {
-			throw new Error('Invalid slice footer');
+			throw new FormatError('Invalid slice footer in ' + lastVolume.fileName);
 		}
 
-		let n = footer.sliceSize;
 		let innerReaders: Reader[] = [];
-		for(let i = 0; i < volumes.length; i++) {
-			let v = volumes[i];
+		let s: WindowsSlice | undefined;
 
-			// TODO: For the last volume, we also can't 
-			let maxSize = (await v.reader.length()) - v.startOffset();
+		try {
+			let n = footer.sliceSize;
+			for(let i = 0; i < volumes.length; i++) {
+				let v = volumes[i];
 
-			// For the last volume, we also can't count any of the footer
-			if(i === volumes.length - 1) {
-				maxSize -= footer.length;
-			}
+				let maxSize = (await v.reader.length()) - v.startOffset();
 
-
-			let size = Math.min(maxSize, n);
-
-			if(size === 0) {
-				throw new Error('Extra data beyond slice size!');
-			}
-
-			n -= size;
-
-			innerReaders.push(
-				v.reader.slice(v.startOffset(), v.startOffset() + size)
-			);
-		}
-
-		let reader = await ConcatenatedReader.Create(innerReaders);
-
-		if(n !== 0) {
-			throw new Error('Not all slice data could be found');
-		}
-
-
-		let absoluteReader = await (
-			parent? parent.absoluteReader.append(reader) : ConcatenatedReader.Create([ reader ])
-		);
-
-
-		let s = new WindowsSlice(volumes, parent);
-
-		s.reader = reader;
-		s.absoluteReader = absoluteReader;
-		s.trailer = await this.ReadTrailer(reader);
-		s.config = {};
-
-		if(!s.trailer.isValid) {
-			throw new Error('Could not validate slice trailer');
-		}
-
-		// The sector-by-sector trailer is parsed, but where it keeps the slice metadata isn't known yet
-		if(s.trailer.form === SliceForm.SectorBySector) {
-			throw new Error('Sector-by-sector backups are not supported yet');
-		}
-
-
-		// Finally grab the metadata
-		absoluteReader.seek(s.trailer.metaDataOffset);
-		let recs = await ReadAllRecords(absoluteReader);
-
-		let foundSomeConfig = false;
-
-		for(var r of recs) {
-			if(r.type === RecordType.Listing) {
-				if(s.listing) {
-					throw new Error('Got multiple listings in one slice!');
+				// The footer of the last volume isn't slice data
+				if(i === volumes.length - 1) {
+					maxSize -= footer.length;
 				}
 
-				s.listing = r;
+				let size = Math.min(maxSize, n);
+				if(size <= 0) {
+					throw new FormatError('Volume ' + v.fileName + ' is beyond the end of its slice');
+				}
+
+				n -= size;
+
+				innerReaders.push(v.reader.slice(v.startOffset(), v.startOffset() + size));
 			}
-			// NOTE: slices do seem to sometimes legitatemely have duplicate configurations, but we will ignore them and just take the last one in the file
-			else if(r.type === RecordType.Config) {
-				await ParseConfigRecord(r, s.config);
-				foundSomeConfig = true;
+
+			if(n !== 0) {
+				throw new FormatError('Not all slice data could be found (' + n + ' bytes missing)');
 			}
+
+			// Ownership of the inner readers moves to the concatenated reader
+			let reader = await ConcatenatedReader.Create(innerReaders);
+			innerReaders = [];
+
+			s = new WindowsSlice(volumes, parent, reader);
+
+			s.absoluteReader = await (
+				parent ? parent.absoluteReader.append(reader) : ConcatenatedReader.Create([ reader.slice() ])
+			);
+
+			s.trailer = await this.ReadTrailer(reader);
+
+			if(!s.trailer.isValid) {
+				throw new FormatError('Could not validate slice trailer');
+			}
+
+			// The sector-by-sector trailer is parsed, but where it keeps the slice metadata isn't known yet
+			if(s.trailer.form === SliceForm.SectorBySector) {
+				throw new NotSupportedError('Sector-by-sector (disk image) backups are not supported yet');
+			}
+
+			s._fileTime = (await fs.promises.stat(lastVolume.fileName)).mtime;
+
+			await s.readMetadata();
+
+			return s;
 		}
+		catch(e) {
+			for(let r of innerReaders) {
+				await r.close();
+			}
 
-		if(!s.listing) {
-			throw new Error('Slice missing listing');
+			if(s) {
+				await s.close();
+			}
+
+			throw e;
 		}
-
-		if(!foundSomeConfig) {
-			throw new Error('Slice missing any configuration info');
-		}
-
-		return s;
-
 	}
 
 	/**
@@ -131,104 +119,138 @@ export default class WindowsSlice extends Slice {
 
 		reader = reader.slice();
 
-		let end = await reader.length()
+		try {
+			let end = await reader.length();
 
-		reader.seek(end - 4);
+			reader.seek(end - 4);
+			let lastFour = await reader.readBytes(4);
 
-		let lastFour = Buffer.from(await reader.readBytes(4));
+			// TODO: Validate all of the offsets we are reading are actually with-in the bounds of the slice/files
+			// TODO: All offsets must also not intersect with the header/footer of the file
 
+			// File/directory-based backups. The trailer is just the metadata offset.
+			if(lastFour.equals(FILE_SYSTEM_MAGIC)) {
+				reader.seek(end - 12);
+				let metaDataOffset = await reader.readUint64();
 
-		// TODO: Validate all of the offsets we are reading are actually with-in the bounds of the slice/files
-		// TODO: All offsets must also not intersect with the header/footer of the file
+				return { isValid: true, form: SliceForm.FileSystem, metaDataOffset };
+			}
 
+			// Sector-by-sector backups. Partly understood; see doc/Format-Windows.md
+			if(lastFour.equals(SECTOR_BY_SECTOR_MAGIC)) {
+				return { isValid: true, form: SliceForm.SectorBySector, metaDataOffset: -1 };
+			}
 
-		let form = SliceForm.Unknown;
-		let metaDataOffset = -1;
-		let isValid = true;
-
-		// Usually this case is for file/directory-based backups
-		// The header for these is pretty trivial
-		if(lastFour.equals(Buffer.from('2C8AE194', 'hex'))) {
-			form = SliceForm.FileSystem;
-			reader.seek(end - 12); // < Right before the last 4 characters
-			metaDataOffset = await reader.readUint64();
+			warn('Unknown slice trailer magic: ' + lastFour.toString('hex'));
+			return { isValid: false, form: SliceForm.Unknown, metaDataOffset: -1 };
 		}
-		// For sector-by-sector backups
-		else if(lastFour.equals(Buffer.from('2B8AE194', 'hex'))) {
-			form = SliceForm.SectorBySector;
-
-			console.warn('Sector-by-sector mode not yet supported')
-
-			// TODO: Refigure this out
-
-			reader.seek(end - 8);
-
-			let trailerSize = await reader.readUint32();
-
-
-			let startOfTrailer = end - 8 - trailerSize;
-
-			reader.seek(startOfTrailer);
-
-			let trailer = Buffer.from(await reader.readBytes(trailerSize));
-
-			let pos = 0;
-
-			// First two bytes of the trailer are always zero
-			pos += 2;
-			
-			// Offset of the metadata entry
-			let metaDataOffLen = trailer[pos]; pos += 1;
-			let metaDataOff = trailer.readUIntLE(pos, metaDataOffLen); pos += metaDataOffLen;
-
-			pos += 7;
-
-			// This is the total fully uncompressed size of the main partition?
-			let fullSizeLen = trailer[pos]; pos += 1;
-			let fullSize = trailer.readUIntLE(pos, fullSizeLen); pos += fullSizeLen;
-
-			pos += 2;
-
-			let metaDataOff2Len = trailer[pos]; pos += 1;
-			let metaDataOff2 = trailer.readUIntLE(pos, metaDataOff2Len); pos += metaDataOff2Len;
-
-
+		finally {
+			await reader.close();
 		}
-		else {
-			console.warn(lastFour);
-			isValid = false;
-		}
-
-
-		await reader.close();
-
-		return {
-			isValid,
-			metaDataOffset,
-			form
-		};
 	}
 
 
-	reader!: Reader; /**< A reader over this single slice */
+	reader: Reader; /**< A reader over this single slice */
 	absoluteReader!: ConcatenatedReader; /**< A reader over the entire archive up to this point (We don't need to use a full archive reader as we don't expect a slice to contain data from future not-yet created child slices). The totalReader of the final slice can be considering to completely cover the entire archive */
 
 	trailer!: SliceTrailer;
 	config: SliceConfig = {};
 	listing!: ListingRecord;
 
-	get id() {
-		// TODO
-		return Buffer.from([]);
+	private _id?: Buffer;
+	private _creationTime?: Date;
+	private _fileTime?: Date;
+	private _cache: LRUCache<number, Buffer> = createBlockCache<number>();
+	private _closed = false;
+
+	private constructor(volumes: Windows2015Volume[], parent: WindowsSlice|null, reader: Reader) {
+		super(volumes, parent);
+		this.reader = reader;
 	}
 
+	/**
+	 * Reads the config and listing records that follow the trailer's metadata offset
+	 */
+	private async readMetadata() {
+		let r = this.absoluteReader.slice();
+		try {
+			r.seek(this.trailer.metaDataOffset);
+			let size = await r.length();
+
+			while(r.pos() < size) {
+				let rec = await ReadRecord(r);
+
+				if(rec.type === RecordType.EndTrailer) {
+					break;
+				}
+				else if(rec.type === RecordType.Listing) {
+					if(this.listing) {
+						throw new FormatError('Got multiple listings in one slice');
+					}
+
+					this.listing = rec;
+				}
+				// NOTE: slices sometimes have duplicate configurations. The last one wins.
+				else if(rec.type === RecordType.Config) {
+					if(rec.creationTime) {
+						this._creationTime = rec.creationTime;
+					}
+					if(rec.id) {
+						this._id = rec.id;
+					}
+
+					try {
+						await ParseConfigRecord(rec, this.config);
+					}
+					catch(e: any) {
+						warn('Could not fully parse slice configuration: ' + e.message);
+					}
+
+					// Encrypted data can't be read; say so instead of failing on garbage later
+					let enc = this.config.encryption;
+					if(enc && enc.toLowerCase() !== 'none') {
+						throw new NotSupportedError('Encrypted backups are not supported (encryption: ' + enc + ')');
+					}
+				}
+			}
+		}
+		finally {
+			await r.close();
+		}
+
+		if(!this.listing) {
+			throw new FormatError('Slice is missing its file listing');
+		}
+	}
+
+	/**
+	 * 16 byte id from the slice configuration (falls back to the 4 byte slice key of the volume header)
+	 */
+	get id() {
+		return this._id || this.volumes[0].header.sliceKey;
+	}
+
+	/**
+	 * When the backup was made (falls back to when its last file was written)
+	 */
 	get creationTime() {
-		// TODO
-		return new Date()
+		return this._creationTime || this._fileTime || new Date(0);
+	}
+
+	async openFileSystem() {
+		return new WindowsFS(this.absoluteReader, this.listing.files, this._cache, this.creationTime);
 	}
 
 	async close() {
+		if(this._closed) {
+			return;
+		}
 
+		this._closed = true;
+		this._cache.clear();
+		await this.reader.close();
+		if(this.absoluteReader) {
+			await this.absoluteReader.close();
+		}
 	}
-
 }

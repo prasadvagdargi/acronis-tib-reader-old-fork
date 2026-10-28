@@ -3,6 +3,8 @@ import { ReadRecord, ReadChunkHeader, ReadAllBoxes } from './record';
 import { Box } from './box';
 import { Reader, BufferReader } from '../reader';
 import { CheckAllZeros } from '../utils';
+import { warn } from '../log';
+import { FormatError } from '../errors';
 
 
 export interface MacVolumeMetaFile {
@@ -22,7 +24,7 @@ export async function ParseMacVolumeMetaFile(reader: Reader): Promise<MacVolumeM
 		let metaHeader = Buffer.from(await reader.readBytes(16));
 
 		if(metaHeader[0] !== 0x77 || metaHeader[1] !== 0x14) {
-			console.warn('Strange looking meta header:', metaHeader);
+			warn('Strange looking meta header: ' + metaHeader.toString('hex'));
 		}
 
 
@@ -35,7 +37,7 @@ export async function ParseMacVolumeMetaFile(reader: Reader): Promise<MacVolumeM
 			);
 
 			if(!(await CheckAllZeros(reader, record.inner_end - reader.pos()))) {
-				console.warn('Detected unknown data in padding after compressed stream');
+				warn('Detected unknown data in padding after compressed stream');
 			}
 
 			let chunkReader = new BufferReader(chunkData);
@@ -50,14 +52,14 @@ export async function ParseMacVolumeMetaFile(reader: Reader): Promise<MacVolumeM
 			// Usually is the first record and i don't know what it means
 		}
 		else {
-			console.warn('(META) Unknown record flags:', record.flags);
+			warn('Unknown metadata record flags: 0x' + record.flags.toString(16));
 		}
 
 		reader.seek(record.end);
 	}
 
 	if(reader.pos() !== size) {
-		throw new Error('Did not correctly consume entire metafile');
+		throw new FormatError('Did not correctly consume entire metafile');
 	}
 
 
