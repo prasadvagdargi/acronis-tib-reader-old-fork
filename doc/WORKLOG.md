@@ -49,3 +49,16 @@ Step-by-step notes on the `modernize-and-fixes` branch, newest last. The open it
    - an extracted 25 MB zip passes its own CRC checks for all 66 entries; extracted JPEGs decode
    - backup time read from the config record (2024-06-22 00:30:07 UTC) matches the file's write time
    Extracted copies were written to a temporary folder and deleted afterwards.
+7. `tib` CLI, safe extraction, WebDAV mount and optional FUSE mount. Checked on the real backup:
+   - `info`, `ls -l`, `verify --quick` work; wrong usage exits 2, errors exit 1
+   - extracting `/G/Movies` (546 files) gives exact sizes and modified times; a second run refuses to
+     overwrite; `cat` output equals the extracted file
+   - WebDAV: OPTIONS, PROPFIND, ranged GET, 416 for bad ranges, 403 for writes, 400 for `..` paths
+   - **Windows drive**: `net use T: http://127.0.0.1:8642/` started the WebClient service and mapped
+     the backup; Windows listed folders with correct dates and copied a file identical to `cat`
+   - Windows' WebDAV client refuses files over 50 MB by default (`FileSizeLimitInBytes` = 50000000 on
+     this machine; a 108 MB copy failed). Documented the registry fix and the WinFsp + rclone route;
+     both need admin rights so they weren't applied.
+   - Files were first advertised as read-only; Windows kept that flag on copies, so they're now shown
+     with the normal archive attribute (the server still refuses all writes).
+   - Drive roots have no stored time; they now show the backup time instead of 1970.

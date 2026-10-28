@@ -30,7 +30,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` partly done / blocked (reason given)
 - [x] Remove abandoned `fuse-bindings`
 - [x] `.gitattributes` so line endings stay LF on every OS
 - [x] `src/index.ts` public entry point that registers both formats
-- [ ] `tib` command-line tool (`info`, `ls`, `cat`, `extract`, `verify`, `mount`)
+- [x] `tib` command-line tool (`info`, `ls`, `cat`, `extract`, `verify`, `mount`)
 - [ ] GitHub Actions CI on Linux, macOS and Windows (Node 22 and 24)
 
 
@@ -44,7 +44,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` partly done / blocked (reason given)
 - [x] Config XML problems become warnings, not fatal errors
 - [x] Replace remaining `console.warn` calls with `log.warn`
 - [x] Encrypted Windows backups fail with a clear `NotSupportedError`
-- [ ] Extraction must sanitize names (no `..`, no characters invalid on the target OS)
+- [x] Extraction sanitizes names (no `..`, no characters invalid on the target OS) and never writes outside the destination
 - [ ] Replace `assert` calls in the Mac parser with `FormatError`s
 
 
@@ -69,9 +69,11 @@ Legend: `[x]` done, `[ ]` to do, `[~]` partly done / blocked (reason given)
 6. Mounting
 -----------
 - [x] Shared read-only file-system view over a slice (both formats): `slice.openFileSystem()`
-- [ ] WebDAV server mount: works on Windows (map network drive), macOS and Linux with no native code
-- [ ] Optional native FUSE mount on Linux/macOS via `@cocalc/fuse-native` (loaded only if installed)
-- [ ] Unmount cleanly on Ctrl+C; no per-read logging; configurable mount point and port
+- [x] WebDAV server mount: works on Windows (map network drive), macOS and Linux with no native code
+- [~] Windows' WebDAV client limits files to 50 MB by default: documented fixes (registry, or WinFsp + rclone); needs admin, so not applied
+- [ ] Try the WinFsp + rclone route and document exact steps
+- [~] Optional native FUSE mount on Linux/macOS via `@cocalc/fuse-native` (loaded only if installed); untested, no Linux/macOS machine here
+- [x] Unmount cleanly on Ctrl+C; no per-read logging; configurable mount point and port
 
 
 7. Performance
@@ -90,7 +92,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` partly done / blocked (reason given)
 9. Documentation
 ----------------
 - [x] Work log and this to-do list
-- [~] README: status, install, library usage done; CLI and mounting sections to come
+- [x] README: status, install, CLI, mounting on each OS, library usage
 - [x] Windows format notes (`Format-Windows.md`)
 - [ ] Mac format notes (offsets out of code comments)
 - [ ] Fix `/opt/archive` vs `/opt/acronis` mismatch in `samples/README.md`
