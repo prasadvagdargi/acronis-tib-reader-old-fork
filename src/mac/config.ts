@@ -1,7 +1,6 @@
 import { SliceConfig } from '../slice';
 import { ParseXML, AssertKeys, AssertValidUUID } from '../utils';
-import assert from 'assert';
-import { FormatError } from '../errors';
+import { FormatError, check } from '../errors';
 
 
 export async function ParseConfigXML(str: string): Promise<SliceConfig> {
@@ -21,19 +20,18 @@ export async function ParseConfigXML(str: string): Promise<SliceConfig> {
 	let incs: string[]|undefined;
 	
 	if(obj['IncludePath']) {
-		assert(obj['IncludePath'] instanceof Array);
+		check(obj['IncludePath'] instanceof Array, 'IncludePath must be a list');
 		for(var p of obj['IncludePath']) {
-			assert(typeof(p) === 'string');
+			check(typeof(p) === 'string', 'IncludePath entries must be text');
 		}
 
 		incs = obj['IncludePath'];
 	}
 
 
-	assert(obj['MachineId'] instanceof Array);
-	assert(obj['MachineId'].length === 1);
+	check(obj['MachineId'] instanceof Array && obj['MachineId'].length === 1, 'Expected one MachineId');
 	let machineId = obj['MachineId'][0];
-	assert(machineId[0] === '"' && machineId[machineId.length - 1] === '"');
+	check(typeof(machineId) === 'string' && machineId[0] === '"' && machineId[machineId.length - 1] === '"', 'MachineId must be quoted');
 	machineId = machineId.slice(1, machineId.length - 1);
 	AssertValidUUID(machineId);
 

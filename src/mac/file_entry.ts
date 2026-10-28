@@ -1,8 +1,7 @@
-import assert from 'assert';
 import { BoxHandle } from './box';
 import { Reader } from '../reader';
 import { warn } from '../log';
-import { FormatError } from '../errors';
+import { FormatError, check } from '../errors';
 
 
 export enum FileType {
@@ -65,14 +64,14 @@ async function readBoxHandles(reader: Reader, size: number): Promise<BoxHandle[]
 			});
 		}
 
-		assert.equal(reader.pos(), innerStart + len);
+		check(reader.pos() === innerStart + len, 'Box handle list has an unexpected size');
 
 		// Each handle ends with 4 bytes that are usually 0 but i'm not sure what they do
 		reader.skip(4);
 	}
 
 	// Making sure we consumed the right number of bytes
-	assert.equal(reader.pos(), start + size);
+	check(reader.pos() === start + size, 'Box handles have an unexpected size');
 
 	return handles;
 }
@@ -154,7 +153,7 @@ export async function ReadFileEntry(reader: Reader): Promise<FileEntry> {
 	// TODO: Currently this assumes that no rune ever takes up more than 2 bytes
 	let filename = await reader.readStringU16(filenameSize);
 	
-	assert.equal(afterFileName, reader.pos())
+	check(afterFileName === reader.pos(), 'File name has an unexpected size');
 
 	// TODO: The number 27 bytes after the file name gets incremented with each dirent?
 

@@ -1,9 +1,8 @@
 import { ConfigRecord } from './record';
 import { SliceConfig, ProductInfo } from '../slice';
 import { ParseXML, AssertKeys, AssertValidNumber, AssertValidUUID } from '../utils';
-import assert from 'assert';
 import { warn } from '../log';
-import { FormatError } from '../errors';
+import { FormatError, check } from '../errors';
 
 
 export function parseProductInfoTag(obj: any, config: SliceConfig) {
@@ -13,7 +12,7 @@ export function parseProductInfoTag(obj: any, config: SliceConfig) {
 
 	let name = obj['$']['name'];
 
-	assert(obj['version'] instanceof Array); assert(obj['version'].length === 1);
+	check(obj['version'] instanceof Array && obj['version'].length === 1, 'productinfo needs one version');
 	let ver = obj['version'][0];
 	AssertKeys(ver, ['$']); AssertKeys(ver['$'], ['major', 'minor'])
 
@@ -23,7 +22,7 @@ export function parseProductInfoTag(obj: any, config: SliceConfig) {
 	let ver_minor = ver['$']['minor'];
 	AssertValidNumber(ver_minor);
 
-	assert(obj['build'] instanceof Array); assert(obj['build'].length === 1);
+	check(obj['build'] instanceof Array && obj['build'].length === 1, 'productinfo needs one build');
 	let build = obj['build'][0];
 	AssertKeys(build, ['$']); AssertKeys(build['$'], ['number']);
 
@@ -68,8 +67,7 @@ export function parseMetadataTag(obj: any, config: SliceConfig) {
 	let keys = ['productinfo', 'task_id', 'computer_id', 'compression', 'encryption'];
 	AssertKeys(obj, keys);
 	for(let k of keys) {
-		assert(obj[k] instanceof Array);
-		assert(obj[k].length === 1);
+		check(obj[k] instanceof Array && obj[k].length === 1, 'metainfo needs exactly one ' + k);
 	}
 
 	parseProductInfoTag(obj['productinfo'][0], config);

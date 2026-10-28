@@ -1,7 +1,6 @@
 import { FileEntry, ReadFileEntry } from './file_entry';
-import assert from 'assert';
 import { Reader } from '../reader';
-import { FormatError } from '../errors';
+import { FormatError, check } from '../errors';
 
 
 // TODO: Start validating this again for all of the boxes instead of records
@@ -162,7 +161,7 @@ export async function ReadBox(reader: Reader): Promise<Box> {
 	let box: Box;
 
 	if(type === BoxType.Container) {
-		assert(bodySize === 7);
+		check(bodySize === 7, 'Container box has an unexpected size');
 
 		box = {
 			start, end,
@@ -180,7 +179,7 @@ export async function ReadBox(reader: Reader): Promise<Box> {
 	}
 	else if(type === BoxType.StatTime) {
 		reader.skip(3);
-		assert(bodySize === 19)
+		check(bodySize === 19, 'StatTime box has an unexpected size');
 		
 		let ctime = await reader.readUint64();
 
@@ -194,7 +193,7 @@ export async function ReadBox(reader: Reader): Promise<Box> {
 		};
 	}
 	else if(type === BoxType.StatUser) {
-		assert.equal(bodySize, 23);
+		check(bodySize === 23, 'StatUser box has an unexpected size');
 
 		reader.skip(11);
 		let user_id = await reader.readUint32();
@@ -226,7 +225,7 @@ export async function ReadBox(reader: Reader): Promise<Box> {
 			});
 		}
 
-		assert.strictEqual(reader.pos(), bodyEnd, 'Not all attribute data consumed'); 
+		check(reader.pos() === bodyEnd, 'Not all attribute data consumed'); 
 
 		box = {
 			start, end,

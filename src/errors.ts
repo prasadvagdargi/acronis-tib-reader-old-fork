@@ -11,3 +11,12 @@ export class FormatError extends Error {
 export class NotSupportedError extends Error {
 	override name = 'NotSupportedError';
 }
+
+/**
+ * Throws a FormatError if a parsed value isn't what the format requires
+ */
+export function check(condition: unknown, message: string): asserts condition {
+	if(!condition) {
+		throw new FormatError(message);
+	}
+}

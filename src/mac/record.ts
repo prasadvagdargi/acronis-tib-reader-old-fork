@@ -1,8 +1,7 @@
 import { ReadBox, Box } from './box';
 import { Reader } from '../reader';
-import assert from 'assert';
 import { warn } from '../log';
-import { FormatError } from '../errors';
+import { FormatError, check } from '../errors';
 
 
 export interface Chunk {
@@ -172,7 +171,7 @@ export async function ReadAllBoxes(reader: Reader, chunk: Chunk): Promise<Box[]>
 		out.push(box);
 	}
 
-	assert.strictEqual(reader.pos(), chunk.inner_end, 'Over/underrun of chunk');
+	check(reader.pos() === chunk.inner_end, 'Over/underrun of chunk');
 
 	return out;
 }
