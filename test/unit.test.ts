@@ -14,6 +14,7 @@ import { setWarningHandler } from '../src/log';
 import { safeFileName } from '../src/fs/extract';
 import { splitPath } from '../src/fs/tree';
 import { parseRange } from '../src/mount/webdav';
+import { normalizeDriveTarget } from '../src/mount/rclone';
 import { tempDir } from './helpers/windows-fixture';
 
 
@@ -238,6 +239,15 @@ describe('paths and names', () => {
 		assert.equal(safeFileName('nul.txt', 'win32'), '_nul.txt');
 		assert.equal(safeFileName('trailing. ', 'win32'), 'trailing__');
 	});
+});
+
+
+test('drive targets: letters on Windows, folders elsewhere', () => {
+	assert.equal(normalizeDriveTarget('r', 'win32'), 'R:');
+	assert.equal(normalizeDriveTarget('R:', 'win32'), 'R:');
+	assert.equal(normalizeDriveTarget('C:\\mnt\\backup', 'win32'), 'C:\\mnt\\backup');
+	assert.equal(normalizeDriveTarget('r', 'linux'), 'r');
+	assert.equal(normalizeDriveTarget('/mnt/backup', 'darwin'), '/mnt/backup');
 });
 
 

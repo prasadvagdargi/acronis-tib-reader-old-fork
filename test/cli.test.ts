@@ -83,6 +83,7 @@ describe('tib command line', () => {
 		assert.equal(tib('ls').code, 2);
 		assert.equal(tib('ls', backup, '--slice', 'x').code, 2);
 		assert.equal(tib('--bogus-flag').code, 2);
+		assert.equal(tib('mount', backup, '--fuse', 'x', '--drive', 'y').code, 2);
 		assert.match(tib('--version').out, /^\d+\.\d+\.\d+/);
 	});
 

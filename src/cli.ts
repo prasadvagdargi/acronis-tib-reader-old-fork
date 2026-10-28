@@ -7,6 +7,7 @@ import { extract } from './fs/extract';
 import { WindowsFS } from './win/fs';
 import { WebDavServer } from './mount/webdav';
 import { FuseMount } from './mount/fuse';
+import { RcloneMount, normalizeDriveTarget } from './mount/rclone';
 
 
 const USAGE = `Usage: tib <command> <backup file> [options]
@@ -30,7 +31,9 @@ Options:
       --overwrite     extract: replace files that already exist
       --quick         verify: only check the structure, not every data block
   -q, --quiet         extract, verify: only print the summary
-  -p, --port <n>      mount: WebDAV port (default 8642)
+  -d, --drive <X:>    mount: also mount it as a real drive (Windows letter, or a folder on macOS/Linux)
+                      through rclone; no file size limits. Needs rclone + WinFsp (Windows) or FUSE
+  -p, --port <n>      mount: WebDAV port (default 8642; a free port with --drive)
       --host <addr>   mount: address to listen on (default 127.0.0.1, this computer only)
       --fuse <dir>    mount: use native FUSE at <dir> instead of WebDAV (Linux/macOS, optional package)
       --debug         Show stack traces on errors
@@ -38,8 +41,10 @@ Options:
   -v, --version       Show the version
 
 Mounting:
-  By default 'tib mount' starts a read-only WebDAV server, which every OS can open as a drive:
-    Windows: net use Z: http://127.0.0.1:8642/   (or Map network drive in File Explorer)
+  'tib mount <backup> --drive R:' shows the backup as drive R: (best on Windows; needs
+  'winget install WinFsp.WinFsp' and 'winget install Rclone.Rclone' once).
+  Without --drive, 'tib mount' only starts a read-only WebDAV server, which every OS can open:
+    Windows: net use Z: http://127.0.0.1:8642/   (Windows limits files to 50 MB this way)
     macOS:   Finder > Go > Connect to Server > http://127.0.0.1:8642/
     Linux:   gio mount dav://127.0.0.1:8642/     (or open that address in the file manager)
   Press Ctrl+C to stop.`;
@@ -58,6 +63,7 @@ const OPTIONS = {
 	port: { type: 'string', short: 'p' },
 	host: { type: 'string' },
 	fuse: { type: 'string' },
+	drive: { type: 'string', short: 'd' },
 	debug: { type: 'boolean' },
 	help: { type: 'boolean', short: 'h' },
 	version: { type: 'boolean', short: 'v' },
@@ -65,7 +71,7 @@ const OPTIONS = {
 
 type Options = {
 	slice?: string; long?: boolean; recursive?: boolean; json?: boolean; overwrite?: boolean; quick?: boolean;
-	quiet?: boolean; port?: string; host?: string; fuse?: string; debug?: boolean; help?: boolean; version?: boolean;
+	quiet?: boolean; port?: string; host?: string; fuse?: string; drive?: string; debug?: boolean; help?: boolean; version?: boolean;
 };
 
 
@@ -371,11 +377,36 @@ async function cmdMount(args: string[], opts: Options) {
 	try {
 		let snapshot = await pickSlice(archive, opts).openFileSystem();
 
+		if(opts.fuse && opts.drive) {
+			throw new UsageError('Use either --fuse or --drive, not both');
+		}
+
 		if(opts.fuse) {
 			let mount = new FuseMount(snapshot, opts.fuse);
 			await mount.mount();
 			out('Mounted read-only at ' + path.resolve(opts.fuse) + '. Press Ctrl+C to unmount.');
 			stop = () => mount.unmount();
+		}
+		else if(opts.drive) {
+			// rclone talks to our WebDAV server over loopback; any free port will do
+			let server = new WebDavServer(snapshot);
+			let addr = await server.listen(parseIntOption(opts.port, 'port', 0), '127.0.0.1');
+
+			let target = normalizeDriveTarget(opts.drive);
+			let drive = new RcloneMount('http://127.0.0.1:' + addr.port + '/', target, archive.name);
+			try {
+				await drive.mount();
+			}
+			catch(e) {
+				await server.close();
+				throw e;
+			}
+
+			out('Mounted the backup read-only as ' + target + '. Press Ctrl+C to unmount.');
+			stop = async () => {
+				await drive.unmount();
+				await server.close();
+			};
 		}
 		else {
 			let host = opts.host || '127.0.0.1';

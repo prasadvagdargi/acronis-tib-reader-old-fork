@@ -57,7 +57,7 @@ tib extract "D:/Backups/MyBackup_full_b1_s1_v1.tib" ./restored /G/Pictures
 tib verify "D:/Backups/MyBackup_full_b1_s1_v1.tib"
 ```
 ```bash
-tib mount "D:/Backups/MyBackup_full_b1_s1_v1.tib"
+tib mount "D:/Backups/MyBackup_full_b1_s1_v1.tib" --drive R:
 ```
 
 | Command | What it does |
@@ -67,7 +67,7 @@ tib mount "D:/Backups/MyBackup_full_b1_s1_v1.tib"
 | `cat <backup> <path>` | Write one file to standard output |
 | `extract <backup> <dest> [path]` | Copy a folder's contents (or one file) into `dest`, keeping modified times. Refuses to overwrite unless `--overwrite` |
 | `verify <backup>` | Check every data block (Windows: against its stored MD5). `--quick` checks only the structure |
-| `mount <backup>` | Serve the backup as a read-only drive (see below) |
+| `mount <backup> [--drive R:]` | Show the backup as a read-only drive (see below) |
 
 `-s N` / `--slice N` picks the backup point: `1` is the oldest, `-1` (default) the newest.
 Windows backups show each backed up drive as a top-level folder: `G:\Pictures` is `/G/Pictures`.
@@ -76,8 +76,29 @@ Exit codes: `0` success, `1` error or verification problems, `2` wrong usage.
 
 Mounting as a drive
 -------------------
-`tib mount` starts a read-only WebDAV server on `http://127.0.0.1:8642/` (this computer only;
-`--port` and `--host` change that). Every OS can open it without extra software. Press Ctrl+C to stop.
+### Windows (recommended): a real drive letter
+Install [WinFsp](https://winfsp.dev) and [rclone](https://rclone.org) once (WinFsp asks for administrator
+approval), then open a new terminal:
+```bash
+winget install WinFsp.WinFsp
+```
+```bash
+winget install Rclone.Rclone
+```
+```bash
+tib mount "D:/Backups/MyBackup_full_b1_s1_v1.tib" --drive R:
+```
+The backup appears as read-only drive `R:` in File Explorer, with no file size limit. Press Ctrl+C (or
+close the terminal) to unmount. Tested with a 55 GB backup: a 925 MB file streams at ~27 MB/s and
+random-offset reads match the original bytes. If `tib` is ever killed forcibly, also end `rclone.exe`
+in Task Manager to remove the drive.
+
+`--drive` also works on macOS and Linux with an empty folder instead of a letter (needs rclone and FUSE).
+Set `TIB_RCLONE` if rclone isn't on the PATH.
+
+### Without installing anything: WebDAV
+`tib mount` without `--drive` starts a read-only WebDAV server on `http://127.0.0.1:8642/` (this
+computer only; `--port` and `--host` change that). Every OS can open it with built-in tools.
 
 **Windows**: map it as a drive (File Explorer > This PC > Map network drive), or:
 ```bash
@@ -86,8 +107,8 @@ net use Z: http://127.0.0.1:8642/ /persistent:no
 Remove it when done with `net use Z: /delete`.
 
 Windows' WebDAV client refuses files larger than 50 MB by default ("The file size exceeds the limit
-allowed"). Either use `tib extract` for big files, or raise the limit to the maximum (4 GB) from an
-administrator terminal, then restart the WebClient service:
+allowed"). Use `--drive` above, `tib extract` for big files, or raise the limit to the maximum (4 GB)
+from an administrator terminal and restart the WebClient service:
 ```bash
 reg add HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters /v FileSizeLimitInBytes /t REG_DWORD /d 4294967295 /f
 ```
@@ -97,12 +118,8 @@ net stop webclient
 ```bash
 net start webclient
 ```
-For a full drive with no size limit, install [WinFsp](https://winfsp.dev) and [rclone](https://rclone.org)
-and mount the WebDAV server through them (not yet tested here):
-```bash
-rclone mount :webdav: Z: --webdav-url http://127.0.0.1:8642/ --read-only
-```
 
+### macOS and Linux
 **macOS**: Finder > Go > Connect to Server > `http://127.0.0.1:8642/`
 
 **Linux**: open `dav://127.0.0.1:8642/` in the file manager, or:
