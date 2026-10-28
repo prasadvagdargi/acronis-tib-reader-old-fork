@@ -434,6 +434,25 @@ async function cmdMount(args: string[], opts: Options) {
 }
 
 
+/**
+ * Version from the package's package.json (searched upwards, so it works from dist/ and test builds)
+ */
+function packageVersion(): string {
+	let dir = __dirname;
+	for(let i = 0; i < 4; i++) {
+		let file = path.join(dir, 'package.json');
+		if(fs.existsSync(file)) {
+			let pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
+			if(pkg.name === 'acronis-tib') {
+				return pkg.version;
+			}
+		}
+		dir = path.dirname(dir);
+	}
+
+	return 'unknown';
+}
+
 export async function main(argv: string[]): Promise<number> {
 	let parsed;
 	try {
@@ -449,8 +468,7 @@ export async function main(argv: string[]): Promise<number> {
 	let [ command, ...args ] = parsed.positionals;
 
 	if(opts.version) {
-		let pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-		out(pkg.version);
+		out(packageVersion());
 		return 0;
 	}
 
