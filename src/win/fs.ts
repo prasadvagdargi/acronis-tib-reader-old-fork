@@ -56,11 +56,14 @@ export class WindowsFS extends TreeFS<WinNodeData> {
 			// Root (0x83) and folder (0x80) both have the 0x80 bit
 			let isDir = (e.kind & EntryKind.Folder) !== 0;
 
+			// Drive roots are stored without a time; show the backup time instead of 1970
+			let mtime = e.mtime.getTime() === 0 ? creationTime : e.mtime;
+
 			this.addChild(parent, {
 				name,
 				type: isDir ? 'directory' : 'file',
 				size: isDir ? 0 : e.size,
-				mtime: e.mtime
+				mtime
 			}, isDir ? undefined : { listing: e });
 		}
 	}
