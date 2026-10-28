@@ -74,3 +74,6 @@ Step-by-step notes on the `modernize-and-fixes` branch, newest last. The open it
    - CLI tested by running it (exit codes, extract/overwrite, verify catching a corrupted block).
    - `TIB_SAMPLE=<file>` runs an extra test against a real backup; passes on the 55 GB sample.
    - GitHub Actions: Linux, macOS, Windows x Node 22, 24.
+9. Cleanup: parser `assert`s now throw `FormatError` through a `check()` helper; Mac format notes
+   written up from the code (`Format-Mac.md`, unverified); samples README fixed (`/opt/acronis`,
+   dead sample bucket noted); `samples/extract_data.bat` now saves each backup like the Mac script.

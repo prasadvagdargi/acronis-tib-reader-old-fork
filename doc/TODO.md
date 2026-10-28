@@ -45,7 +45,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` partly done / blocked (reason given)
 - [x] Replace remaining `console.warn` calls with `log.warn`
 - [x] Encrypted Windows backups fail with a clear `NotSupportedError`
 - [x] Extraction sanitizes names (no `..`, no characters invalid on the target OS) and never writes outside the destination
-- [ ] Replace `assert` calls in the Mac parser with `FormatError`s
+- [x] Replace `assert` calls in the parsers with `FormatError`s
 
 
 4. Windows format
@@ -97,6 +97,6 @@ Legend: `[x]` done, `[ ]` to do, `[~]` partly done / blocked (reason given)
 - [x] Work log and this to-do list
 - [x] README: status, install, CLI, mounting on each OS, library usage
 - [x] Windows format notes (`Format-Windows.md`)
-- [ ] Mac format notes (offsets out of code comments)
-- [ ] Fix `/opt/archive` vs `/opt/acronis` mismatch in `samples/README.md`
-- [ ] `samples/extract_data.bat`: copy the finished backups like the Mac script does
+- [x] Mac format notes (`Format-Mac.md`, from the code; unverified)
+- [x] Fix `/opt/archive` vs `/opt/acronis` mismatch in `samples/README.md`
+- [x] `samples/extract_data.bat`: copies the finished backups like the Mac script does (untested: needs True Image)
