@@ -11,18 +11,21 @@ Legend: `[x]` done, `[ ]` to do, `[~]` partly done / blocked (reason given)
 Next steps (in priority order)
 ------------------------------
 1. **Merge**: open a pull request from `modernize-and-fixes` into `master` and review it.
-2. **Windows drive without the 50 MB limit**: install WinFsp + rclone and test
-   `rclone mount :webdav: Z: --webdav-url http://127.0.0.1:8642/ --read-only` against `tib mount`;
-   document exact steps (needs an administrator for the WinFsp driver).
-3. **More real samples**: an incremental chain, a backup split into several files, an encrypted one and a
-   sector-by-sector one (True Image for Windows), plus any Mac backup. Run `TIB_SAMPLE=<file> npm test`
-   and `tib verify` on each, then fix what breaks and record findings in the format notes.
-4. **Native FUSE**: test `tib mount --fuse` on Linux and macOS with `@cocalc/fuse-native`.
-5. **Windows attributes in mounts**: show hidden/system flags and creation times (needs a per-entry
+2. **Quick wins from tib-reader** (Phase 0 of `Plan-tib-reader.md`): recognize `.tibx` and the other known
+   variants with clear errors, stop sending True Image 2010-2013 files to the Mac parser, check alternate
+   data streams on the real backup, doc fixes.
+3. **More real samples**: an incremental chain, a backup split into several files, an encrypted one, a
+   sector-by-sector `.tib` and a `.tibx` (True Image for Windows), plus any Mac backup. Run
+   `TIB_SAMPLE=<file> npm test` and `tib verify` on each, then fix what breaks and record findings in the
+   format notes.
+4. **Disk images, NTFS and `.tibx`**: Phases 1-3 of `Plan-tib-reader.md`. No longer blocked on samples:
+   acronis-tib-reader documents these formats from real files, so work can start against synthetic
+   fixtures.
+5. **Native FUSE / `--drive` on Linux and macOS**: test `tib mount --fuse` (with `@cocalc/fuse-native`)
+   and `tib mount --drive <folder>` (with rclone + FUSE).
+6. **Windows attributes in mounts**: show hidden/system flags and creation times (needs a per-entry
    metadata read, so cache it).
-6. **Synthetic Mac fixture** following `Format-Mac.md`, so the Mac parser has end-to-end tests.
-7. **Sector-by-sector support** once a sample exists (expose the disk image as one file, readable by
-   standard tools).
+7. **Synthetic Mac fixture** following `Format-Mac.md`, so the Mac parser has end-to-end tests.
 
 
 1. Bugs found in review
@@ -87,8 +90,7 @@ Next steps (in priority order)
 -----------
 - [x] Shared read-only file-system view over a slice (both formats): `slice.openFileSystem()`
 - [x] WebDAV server mount: works on Windows (map network drive), macOS and Linux with no native code
-- [~] Windows' WebDAV client limits files to 50 MB by default: documented fixes (registry, or WinFsp + rclone); needs admin, so not applied
-- [ ] Try the WinFsp + rclone route and document exact steps
+- [x] Windows' 50 MB WebDAV limit avoided: `tib mount --drive R:` mounts through rclone + WinFsp (tested on the 55 GB backup); registry fix still documented for `net use`
 - [~] Optional native FUSE mount on Linux/macOS via `@cocalc/fuse-native` (loaded only if installed); untested, no Linux/macOS machine here
 - [x] Unmount cleanly on Ctrl+C; no per-read logging; configurable mount point and port
 
@@ -117,3 +119,14 @@ Next steps (in priority order)
 - [x] Mac format notes (`Format-Mac.md`, from the code; unverified)
 - [x] Fix `/opt/archive` vs `/opt/acronis` mismatch in `samples/README.md`
 - [x] `samples/extract_data.bat`: copies the finished backups like the Mac script does (untested: needs True Image)
+- [x] Compared with acronis-tib-reader; plan in `Plan-tib-reader.md`
+
+
+10. Formats from acronis-tib-reader
+-----------------------------------
+Details, sizes and order in `Plan-tib-reader.md`.
+- [ ] Phase 0: quick wins (variant detection, ADS check, doc fixes, browser downloads on Windows)
+- [ ] Phase 1: sector-by-sector `.tib` as a raw partition image (modern and legacy chunk maps)
+- [ ] Phase 2: NTFS reader (with `$ATTRIBUTE_LIST`, LZNT1, WOF/Xpress) and MBR/GPT partitions
+- [ ] Phase 3: `.tibx` (pages, LSM trees, Zstd segments, split files, backup chain)
+- [ ] Phase 4: encryption, only once real encrypted samples exist

@@ -77,3 +77,29 @@ Step-by-step notes on the `modernize-and-fixes` branch, newest last. The open it
 9. Cleanup: parser `assert`s now throw `FormatError` through a `check()` helper; Mac format notes
    written up from the code (`Format-Mac.md`, unverified); samples README fixed (`/opt/acronis`,
    dead sample bucket noted); `samples/extract_data.bat` now saves each backup like the Mac script.
+10. Windows drive without the 50 MB limit. With the maintainer's approval, installed WinFsp 2.1 (admin
+    prompt) and rclone 1.75.1 with winget (both installer hashes verified by winget).
+    - `rclone mount :webdav: R: --webdav-url http://127.0.0.1:8642/ --read-only` over `tib mount` gave
+      a real drive: the 108 MB file Windows' WebDAV client refused, and the 925 MB largest file, streamed
+      byte-identical to direct reads (~22-27 MB/s); seeks at 5 offsets matched; writes are refused
+      ("The media is write protected"); killing rclone removes the drive.
+    - Built in as `tib mount <backup> --drive R:` (`src/mount/rclone.ts`): WebDAV on a free loopback
+      port, rclone as a child process, unmount on Ctrl+C. rclone is found on PATH, in winget's links or
+      package folder (winget only adds it to the user PATH, which running programs don't see), or via
+      `TIB_RCLONE`.
+    - Lesson: the process serving the drive must never touch it with synchronous file calls; that
+      blocks the WebDAV server and deadlocks. Readiness checks use async calls.
+    - If `tib` is killed forcibly, rclone keeps the (dead) drive until it's ended too; documented.
+
+
+2026-10-27: comparison with acronis-tib-reader
+----------------------------------------------
+- Cloned https://github.com/TreadingTheTiber/acronis-tib-reader (Python, MIT, v0.3.0, commit `e786c68`)
+  to `../tib-reader` and read its code and docs. Nothing from it was run.
+- Its "FS-mode hybrid `.tib`" is our Windows file/folder format. It walks the backup in order and matches
+  files to names by size; our Listing -> RecordIndex route is exact. Its True Image 2016 sample suggests
+  the format hasn't changed since 2016.
+- It reads two formats we can't: sector-by-sector `.tib` (modern and 2014-2016 legacy chunk maps) and
+  `.tibx` (True Image 2020+), plus NTFS inside disk images. All documented from real files.
+- Found that True Image 2010-2013 headers (version 1, length `0x20`) would be sent to our Mac parser.
+- Plan, risks and what not to copy: `Plan-tib-reader.md`; items added to `TODO.md`.
