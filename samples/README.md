@@ -17,11 +17,15 @@ Normalization
 
 Acronis will include absolute paths in some of the backup types. In order to make the .tib files more reproducible, we will attempt to control the original location of the files and other parameters.
 
-NOTE: If you want to regenerate these files, delete the old .tib files dirst so that acronis doesn't create a second version on top of the original ones
+NOTE: If you want to regenerate these files, delete the old .tib files first so that acronis doesn't create a second version on top of the original ones
+
+NOTE: The original sample files lived in the `gs://acronis-tib` Google Cloud bucket, which no longer
+serves them (every file returns 403 as of October 2026). The tests now generate synthetic Windows
+backups instead (`test/helpers/windows-fixture.ts`) and can run against a real backup via `TIB_SAMPLE`.
 
 ### Mac
 
-- When making file/folder based backups, we will always backup from `/opt/archive/[data-name]`
+- When making file/folder based backups, we will always backup from `/opt/acronis/[data-name]`
 	- Creating the folder initially is why you need your password to run the scripts
 	- NOTE: We can't extract to folders like `/tmp/` as TI is smart enough to completely ignore those folders
 
@@ -68,9 +72,9 @@ The `./extract_data.[sh|bat]` scripts are used to extract and position the data 
 	- Same as `chess-a` but with an incremental backup appended to it with the second commit of the dataset
 	- AKA: This file holds two different slices / snapshots in time
 
-- `win/chess*`
+- `win/chess-a/`, `win/chess-b/`
 	- Created with True Image 2019 for Windows
-	- Windows version of the Mac ones above
+	- Windows version of the Mac ones above (`chess-b` holds the full backup plus the incremental one)
 
 
 ### GPT-EFI Samples
